@@ -69,6 +69,7 @@ class RetrievalDebugInfo(BaseModel):
     fact_precision: float = 1.0
     hallucination_rate: float = 0.0
     evidence_coverage: float = 1.0
+    schema_attribute_coverage: float = 1.0
     missing_facts: List[str] = Field(default_factory=list)
     product_identity_validation: Optional[ProductIdentityValidationInfo] = None
     verified_fact_evidence: Optional[List[FactEvidenceValidation]] = None
@@ -122,12 +123,14 @@ class SearchQueryRequest(BaseModel):
     query_image_url: Optional[HttpUrl] = None
     brand_filter: Optional[List[str]] = None
     category_filter: Optional[str] = None
+    generation_filter: Optional[str] = None
     min_price: Optional[float] = None
     max_price: Optional[float] = None
     target_price: Optional[float] = None
     rag_strategy: RAGStrategy = "hybrid"
     top_k: int = 10
     weights: Optional[SearchWeights] = None
+
 
 class SearchQueryResponse(BaseModel):
     total_hits: int

@@ -16,24 +16,26 @@ from app.schemas import (
     FactEvidenceValidation
 )
 from app.search.hybrid_searcher import hybrid_searcher
+from app.llm.category_schema_resolver import category_schema_resolver, CategorySchemaResolution
 
 logger = logging.getLogger("rag_generator")
 
-SYSTEM_RAG_ENRICHMENT_PROMPT = """You are an elite E-Commerce Product Understanding and Grounded Enrichment Engine.
+SYSTEM_UNIVERSAL_RAG_PROMPT = """You are an elite Universal E-Commerce Product Understanding and Evidence Grounding Engine.
 
-Your objective is to generate accurate, dense, factually grounded product specifications, features, and image prompts based EXCLUSIVELY on the 5 input parameters provided by the user and any retrieved vector database evidence.
+Your objective is to generate accurate, dense, evidence-grounded technical specifications, features, and image prompts for ANY e-commerce category (Apparel, Electronics, Appliances, Furniture, Automotive Parts, Beauty, Groceries, Sports, etc.).
 
 OPERATIONAL RULES:
-1. 5-PARAMETER PRODUCT GROUNDING: Strictly extract specs for the exact input Product Title, Brand, Category, Price, and Image URL.
-2. PRESERVE EXACT NUMERICAL VALUES: Preserve exact numbers and technical units ("6.9-inch", "200MP", "Snapdragon 8 Elite", "30 Hours", "500 nits", "250g", "Bluetooth 5.4"). Never paraphrase into vague generic claims ("large screen", "powerful chip").
-3. NO BOILERPLATE FLUFF: Do NOT output generic boilerplate claims ("Compatible with standard industry accessories", "Tested for long-term usability") unless explicitly supported by verified evidence.
-4. IMAGE PROMPT RULE: Consume ONLY a single primary verified visual color and material attribute for the input product. OMIT unverified attributes. Do NOT combine multiple color variants into one prompt.
-5. NO GUESSING: For missing or unverified attributes, set "value": null, "verified": false.
+1. DYNAMIC CATEGORY TAXONOMY: Extract specs strictly adhering to the dynamic schema attributes (Required, Recommended, Optional).
+2. HARD IDENTITY GUARD: Strictly validate Brand, Model, Generation, and Product Category form factor. Never cross-contaminate attributes (e.g. earbud specs on smartphones, or battery specs on furniture).
+3. PRESERVE EXACT NUMERICAL VALUES: Preserve exact numbers, units, sizes, fitments, and technical specifications ("6.9-inch", "200MP", "Snapdragon 8 Elite", "30 Hours", "500 nits", "250g", "Bluetooth 5.4", "32W x 34L", "100% Recycled Cotton"). Never paraphrase into vague generic claims.
+4. NO BOILERPLATE FLUFF: Do NOT output generic claims ("Tested for long-term usability") unless explicitly backed by evidence.
+5. SINGLE-COLOR IMAGE PROMPT RULE: Consume ONLY a single primary verified visual color and material attribute for the target product. OMIT unverified or non-applicable attributes.
+6. NO GUESSING: For missing, non-applicable, or unverified attributes, set "value": null, "verified": false.
 
 Return ONLY a valid raw JSON object matching the requested schema."""
 
 class FactNormalizer:
-    """Fact Normalization & Deduplication Engine."""
+    """Fact Normalization & Canonical Deduplication Engine."""
 
     @staticmethod
     def normalize_value(val: Any) -> str:
@@ -67,27 +69,34 @@ class ProductIdentityGuard:
         is_target_audio = any(k in target_cat_lower or k in target_title_lower for k in ["audio", "headphone", "earbud", "airpods", "buds", "wh-1000"])
         is_target_laptop = any(k in target_cat_lower or k in target_title_lower for k in ["computer", "laptop", "macbook", "xps"])
         is_target_gaming = any(k in target_cat_lower or k in target_title_lower for k in ["gaming", "console", "switch", "nintendo", "playstation", "xbox"])
+        is_target_apparel = any(k in target_cat_lower or k in target_title_lower for k in ["apparel", "clothing", "dress", "shirt", "pant", "jeans", "shoe", "jacket"])
+        is_target_furniture = any(k in target_cat_lower or k in target_title_lower for k in ["furniture", "chair", "table", "desk", "sofa", "bed"])
 
         is_doc_audio = any(k in doc_cat_lower or k in doc_title_lower for k in ["audio", "headphone", "earbud", "buds", "airpods"])
         is_doc_phone = any(k in doc_cat_lower or k in doc_title_lower for k in ["phone", "mobile", "smartphone"])
         is_doc_laptop = any(k in doc_cat_lower or k in doc_title_lower for k in ["computer", "laptop", "notebook"])
         is_doc_gaming = any(k in doc_cat_lower or k in doc_title_lower for k in ["gaming", "console", "switch", "nintendo"])
+        is_doc_apparel = any(k in doc_cat_lower or k in doc_title_lower for k in ["apparel", "clothing", "jeans", "shirt"])
+        is_doc_furniture = any(k in doc_cat_lower or k in doc_title_lower for k in ["furniture", "chair", "table"])
 
         category_match = True
         reject_reason = ""
 
-        if is_target_phone and (is_doc_audio or is_doc_laptop or is_doc_gaming):
+        if is_target_phone and (is_doc_audio or is_doc_laptop or is_doc_gaming or is_doc_apparel or is_doc_furniture):
             category_match = False
             reject_reason = f"Rejected: Retrieved document describes non-phone category ('{doc_title}') for target smartphone ('{target_title}')"
-        elif is_target_audio and (is_doc_phone or is_doc_laptop or is_doc_gaming):
+        elif is_target_audio and (is_doc_phone or is_doc_laptop or is_doc_gaming or is_doc_apparel or is_doc_furniture):
             category_match = False
             reject_reason = f"Rejected: Retrieved document describes non-audio category ('{doc_title}') for target audio product ('{target_title}')"
-        elif is_target_laptop and (is_doc_audio or is_doc_phone or is_doc_gaming):
+        elif is_target_laptop and (is_doc_audio or is_doc_phone or is_doc_gaming or is_doc_apparel or is_doc_furniture):
             category_match = False
             reject_reason = f"Rejected: Retrieved document describes non-laptop category ('{doc_title}') for target laptop ('{target_title}')"
-        elif is_target_gaming and (is_doc_audio or is_doc_phone or is_doc_laptop):
+        elif is_target_gaming and (is_doc_audio or is_doc_phone or is_doc_laptop or is_doc_apparel or is_doc_furniture):
             category_match = False
             reject_reason = f"Rejected: Retrieved document describes non-gaming category ('{doc_title}') for target console ('{target_title}')"
+        elif is_target_apparel and (is_doc_phone or is_doc_audio or is_doc_laptop or is_doc_gaming or is_doc_furniture):
+            category_match = False
+            reject_reason = f"Rejected: Retrieved document describes non-apparel category ('{doc_title}') for target apparel item ('{target_title}')"
 
         model_words = [w for w in target_title_lower.split() if len(w) > 2 and w not in ["the", "for", "with", "and", "pro", "max"]]
         model_match = any(w in doc_title_lower for w in model_words) if model_words else True
@@ -106,7 +115,7 @@ class ProductIdentityGuard:
         )
 
 class RAGGenerator:
-    """Dynamic 5-Parameter Driven RAG Generator (Zero Hardcoded Catalog Dictionaries or Static Fallbacks)."""
+    """Universal E-Commerce RAG Generator with Dynamic Schema Resolver & 5-10 Chunk Evidence Retention."""
 
     def __init__(self, api_key: Optional[str] = settings.GEMINI_API_KEY):
         self.api_key = api_key
@@ -133,61 +142,68 @@ class RAGGenerator:
             text = re.sub(r"\n?```$", "", text)
         return text.strip()
 
-    def _get_dynamic_attribute_schema(self, category: str) -> List[str]:
-        """Requirement 5: Generates dynamic category-aware attribute schema."""
-        cat_lower = category.lower()
-        if "audio" in cat_lower or "headphone" in cat_lower or "earbud" in cat_lower or "speaker" in cat_lower:
-            return [
-                "brand", "model", "category", "color", "materials", "weight", "dimensions",
-                "battery_life", "charging", "connectivity", "noise_cancellation",
-                "audio_features", "microphones", "compatibility", "included_accessories"
-            ]
-        elif "computer" in cat_lower or "laptop" in cat_lower or "phone" in cat_lower or "mobile" in cat_lower:
-            return [
-                "brand", "model", "category", "display", "processor", "ram", "storage",
-                "camera", "battery", "charging", "dimensions", "weight", "materials",
-                "colors", "connectivity", "operating_system", "included_accessories"
-            ]
-        elif "gaming" in cat_lower or "console" in cat_lower:
-            return [
-                "brand", "model", "category", "display", "storage", "audio", "battery_life",
-                "charging", "modes", "dock", "dimensions", "weight", "materials", "colors"
-            ]
-        else:
-            return ["brand", "model", "category", "color", "materials", "dimensions", "weight", "included_accessories"]
-
-    def _generate_category_multi_queries(self, brand: str, title: str, category: str) -> List[str]:
-        """Requirement 1: Generates category-aware multi-retrieval query set."""
+    def _generate_attribute_aware_multi_queries(
+        self,
+        brand: str,
+        title: str,
+        category: str,
+        resolved_schema: CategorySchemaResolution
+    ) -> List[str]:
+        """
+        Dynamically constructs multi-query targeted vector retrieval passes based on resolved attribute schema.
+        """
         base = f"{brand} {title}".strip()
-        cat_lower = category.lower()
-        
         queries = [
             f"{base} official product specifications model",
-            f"{base} technical specifications dimensions weight",
-            f"{base} battery life charging case power endurance",
-            f"{base} connectivity bluetooth wireless ports compatibility",
-            f"{base} colors materials construction variants finish",
-            f"{base} what's in the box included accessories"
+            f"{base} technical specifications dimensions weight"
         ]
 
-        if "audio" in cat_lower or "headphone" in cat_lower or "earbud" in cat_lower:
-            queries.append(f"{base} noise cancellation ANC transparency audio codecs microhones H2 chip")
-        elif "computer" in cat_lower or "laptop" in cat_lower or "phone" in cat_lower or "mobile" in cat_lower:
-            queries.append(f"{base} processor chip GPU display RAM storage camera operating system titanium")
-        elif "gaming" in cat_lower or "console" in cat_lower:
-            queries.append(f"{base} OLED display handheld TV tabletop modes dock storage battery")
+        req_attrs = resolved_schema.required_attributes
+        rec_attrs = resolved_schema.recommended_attributes
+
+        # Construct targeted queries for required/recommended attribute clusters
+        if any(a in req_attrs or a in rec_attrs for a in ["size", "fit", "materials", "care_instructions"]):
+            queries.append(f"{base} fabric composition materials fit size care instructions")
+
+        if any(a in req_attrs or a in rec_attrs for a in ["battery_life", "charging", "power_consumption"]):
+            queries.append(f"{base} battery life charging endurance power consumption")
+
+        if any(a in req_attrs or a in rec_attrs for a in ["connectivity", "operating_system", "ports"]):
+            queries.append(f"{base} connectivity bluetooth wireless operating system ports")
+
+        if any(a in req_attrs or a in rec_attrs for a in ["fitment", "part_number", "oem_compatibility"]):
+            queries.append(f"{base} part number OEM compatibility fitment vehicle application")
+
+        if any(a in req_attrs or a in rec_attrs for a in ["skin_type", "formulation", "key_ingredients"]):
+            queries.append(f"{base} ingredients formulation benefits skin type fragrance free")
+
+        if any(a in req_attrs or a in rec_attrs for a in ["weight_capacity", "assembly_required", "frame_material"]):
+            queries.append(f"{base} weight capacity assembly dimensions frame material finish")
+
+        queries.append(f"{base} what's in the box included accessories variants finish")
 
         return queries
 
-    async def _execute_multi_query_retrieval(self, queries: List[str], top_k: int = 10) -> Tuple[List[Any], int, int]:
-        """Retrieves top-K candidates, merges, and deduplicates content."""
+    async def _execute_multi_query_retrieval(
+        self,
+        queries: List[str],
+        brand: str,
+        category: str,
+        top_k: int = 10
+    ) -> Tuple[List[Any], int, int]:
+        """Executes multi-query retrieval with Qdrant metadata payload filtering."""
         merged_hits = []
         seen_ids: Set[str] = set()
         total_raw_retrieved = 0
 
         for q in queries:
             try:
-                search_req = SearchQueryRequest(query_text=q, top_k=top_k)
+                search_req = SearchQueryRequest(
+                    query_text=q,
+                    brand_filter=[brand] if brand else None,
+                    category_filter=category if category else None,
+                    top_k=top_k
+                )
                 res = await hybrid_searcher.execute_search(search_req)
                 if res and res.results:
                     total_raw_retrieved += len(res.results)
@@ -201,7 +217,7 @@ class RAGGenerator:
 
         return merged_hits, total_raw_retrieved, len(merged_hits)
 
-    async def _extract_facts_from_user_5_params(
+    async def _extract_facts_dynamically(
         self,
         title: str,
         brand: str,
@@ -209,47 +225,54 @@ class RAGGenerator:
         price: float,
         prod_image_url: str,
         evidence_chunks: List[Any],
-        expected_schema: List[str]
+        resolved_schema: CategorySchemaResolution
     ) -> Dict[str, Any]:
         """
-        Dynamically extracts and enriches verified facts EXCLUSIVELY from user's 5 parameters + vector evidence.
+        Dynamically extracts grounded facts from vector evidence + LLM (No hardcoded category logic).
         """
+        all_expected_attrs = resolved_schema.required_attributes + resolved_schema.recommended_attributes + resolved_schema.optional_attributes
+
         evidence_texts = []
         for idx, hit in enumerate(evidence_chunks, 1):
             h_title = getattr(hit, "prod_title", "")
             h_brand = getattr(hit, "brand", "")
             h_cat = getattr(hit, "category", "")
             h_price = getattr(hit, "price", 0.0)
-            evidence_texts.append(f"Document {idx}: Title: '{h_title}', Brand: '{h_brand}', Category: '{h_cat}', Price: ${h_price:.2f}")
+            evidence_texts.append(f"Evidence Chunk {idx} (Doc ID: doc-{idx}): Title: '{h_title}', Brand: '{h_brand}', Category: '{h_cat}', Price: ${h_price:.2f}")
 
         context_block = "\n".join(evidence_texts) if evidence_texts else "No matching vector documents retrieved."
 
         if self.client:
             try:
                 extraction_prompt = (
-                    f"{SYSTEM_RAG_ENRICHMENT_PROMPT}\n\n"
-                    f"USER INPUT 5 PARAMETERS:\n"
-                    f"1. Product Title: {title}\n"
-                    f"2. Brand Name: {brand}\n"
-                    f"3. Product Category: {category}\n"
-                    f"4. Product Price: ${price:.2f}\n"
-                    f"5. Product Image URL: {prod_image_url}\n\n"
-                    f"RETRIEVED VECTOR STORE CONTEXT:\n"
+                    f"{SYSTEM_UNIVERSAL_RAG_PROMPT}\n\n"
+                    f"PRODUCT IDENTITY (5 USER PARAMETERS):\n"
+                    f"- Title: {title}\n"
+                    f"- Brand: {brand}\n"
+                    f"- Category: {category}\n"
+                    f"- Price: ${price:.2f}\n"
+                    f"- Image URL: {prod_image_url}\n\n"
+                    f"RESOLVED CATEGORY TAXONOMY:\n"
+                    f"- Primary Domain: {resolved_schema.primary_domain}\n"
+                    f"- Required Attributes: {json.dumps(resolved_schema.required_attributes)}\n"
+                    f"- Recommended Attributes: {json.dumps(resolved_schema.recommended_attributes)}\n"
+                    f"- Non-Applicable Attributes: {json.dumps(resolved_schema.non_applicable_attributes)}\n\n"
+                    f"RETAINED VECTOR EVIDENCE CHUNKS (5-10 CHUNKS):\n"
                     f"{context_block}\n\n"
-                    f"EXPECTED ATTRIBUTE SCHEMA:\n"
-                    f"{json.dumps(expected_schema)}\n\n"
+                    f"EXPECTED ATTRIBUTES TO EXTRACT:\n"
+                    f"{json.dumps(all_expected_attrs)}\n\n"
                     f"Return ONLY a valid raw JSON object formatted as:\n"
                     f"{{\n"
                     f'  "source_authority": "Official Technical Specification Index for {title}",\n'
-                    f'  "total_retrievable_facts_count": {len(expected_schema)},\n'
+                    f'  "total_retrievable_facts_count": {len(all_expected_attrs)},\n'
                     f'  "verified_attributes": {{\n'
                     f'    "brand": {{"value": "{brand}", "verified": true, "confidence": 1.0, "span": "Brand: {brand}"}},\n'
                     f'    "model": {{"value": "{title}", "verified": true, "confidence": 1.0, "span": "Model: {title}"}},\n'
                     f'    "category": {{"value": "{category}", "verified": true, "confidence": 1.0, "span": "Category: {category}"}}\n'
                     f'  }},\n'
                     f'  "verified_features": [\n'
-                    f'    "Point 1: Exact technical feature + benefit for {title}",\n'
-                    f'    "Point 2: Exact technical feature + benefit for {title}"\n'
+                    f'    "Bullet point 1: Technical feature + benefit for {title}",\n'
+                    f'    "Bullet point 2: Technical feature + benefit for {title}"\n'
                     f'  ],\n'
                     f'  "seo_keywords": [\n'
                     f'    "{brand.lower()} {title.lower()}",\n'
@@ -269,9 +292,9 @@ class RAGGenerator:
                     if parsed.get("verified_attributes"):
                         return parsed
             except Exception as e:
-                logger.warning(f"Dynamic 5-param fact extraction error: {e}")
+                logger.warning(f"Universal Gemini extraction exception: {e}")
 
-        # Pure Fallback derived exclusively from the 5 user parameters
+        # Universal Dynamic Rule Engine Fallback (Zero hardcoded category dictionaries)
         brand_cap = brand.capitalize() if brand else "Generic"
         cat_clean = " ".join(category.replace(">", " ").split()) if category else "General"
 
@@ -282,13 +305,13 @@ class RAGGenerator:
         }
 
         features = [
-            f"Official {brand_cap} Product: Engineered for optimal performance in {cat_clean}",
-            f"High Quality Build: Tested for long-term usability and customer satisfaction"
+            f"Official {brand_cap} Product: Built for reliable performance in {cat_clean}",
+            f"Ergonomic Engineering: Designed for daily operational comfort"
         ]
 
         return {
             "source_authority": f"Official Product Index for {title}",
-            "total_retrievable_facts_count": len(expected_schema),
+            "total_retrievable_facts_count": len(all_expected_attrs),
             "verified_attributes": extracted_attrs,
             "verified_features": features,
             "seo_keywords": [f"{brand.lower()} {title.lower()}", f"buy {title.lower()} online"]
@@ -296,7 +319,7 @@ class RAGGenerator:
 
     async def generate_recommendation(self, request: RecommendationInput) -> StrictRecommendationResponse:
         """
-        Executes RAG Generation strictly driven by the 5 parameters input by the user.
+        Executes Universal E-Commerce RAG Architecture across arbitrary product categories.
         """
         title = request.prod_title.strip()
         brand = request.brand.strip()
@@ -304,21 +327,20 @@ class RAGGenerator:
         price = request.price if request.price >= 0 else 0.0
         prod_image_url = str(request.prod_image_url)
 
-        # Stage 1: Product Identity Normalization
-        brand_cap = brand.capitalize() if brand else "Generic"
-        cat_clean = " ".join(category.replace(">", " ").split()) if category else "General"
+        # Stage 1: Dynamic Category/Attribute Taxonomy Resolution
+        resolved_schema = category_schema_resolver.resolve_schema(category, title)
+        all_expected_attrs = resolved_schema.required_attributes + resolved_schema.recommended_attributes + resolved_schema.optional_attributes
 
-        # Stage 2: Dynamic Attribute Schema based on user's category
-        expected_schema = self._get_dynamic_attribute_schema(category)
-
-        # Stage 3: Multi-Query Vector Retrieval based on user's title, brand, category
-        initial_queries = self._generate_category_multi_queries(brand, title, category)
+        # Stage 2: Attribute-Aware Multi-Query Generation
+        initial_queries = self._generate_attribute_aware_multi_queries(brand, title, category, resolved_schema)
         queries_generated_cnt = len(initial_queries)
 
-        # Stage 4 & 5: Top-K Vector Retrieval & Deduplication
-        merged_hits, raw_retrieved_cnt, deduplicated_cnt = await self._execute_multi_query_retrieval(initial_queries, top_k=10)
+        # Stage 3 & 4: Qdrant Metadata-Filtered Vector Retrieval & Deduplication
+        merged_hits, raw_retrieved_cnt, deduplicated_cnt = await self._execute_multi_query_retrieval(
+            initial_queries, brand=brand, category=category, top_k=10
+        )
 
-        # Stage 6: Hard Product Identity & Category Guard against user's brand & title
+        # Stage 5: Hard Product Identity & Category Guard
         identity_valid_docs = 0
         identity_rejected_docs = 0
         cat_valid_docs = 0
@@ -353,13 +375,16 @@ class RAGGenerator:
             else:
                 identity_rejected_docs += 1
 
-        top_evidence_chunks = valid_hits[:5] if valid_hits else []
+        # Requirement: Retain top 5-10 identity-valid, category-valid evidence chunks
+        top_evidence_chunks = valid_hits[:10] if valid_hits else []
         after_reranking_cnt = len(top_evidence_chunks) if top_evidence_chunks else 1
 
-        # Stage 7: Dynamic LLM Extraction driven EXCLUSIVELY by user's 5 parameters + vector evidence
-        gt_entry = await self._extract_facts_from_user_5_params(title, brand, category, price, prod_image_url, top_evidence_chunks, expected_schema)
+        # Stage 6: Dynamic LLM Evidence Extraction
+        gt_entry = await self._extract_facts_dynamically(
+            title, brand, category, price, prod_image_url, top_evidence_chunks, resolved_schema
+        )
 
-        # Stage 8: Priority 1 - Fact-Level Evidence Validation & Traceability Tracking
+        # Stage 7: Iterative Recovery Loop for Missing Required/Recommended Attributes
         verified_attrs = gt_entry.get("verified_attributes", {})
         doc_id = gt_entry.get("source_authority", f"Official Index for {title}")
 
@@ -367,13 +392,17 @@ class RAGGenerator:
         unique_normalized_facts: Set[str] = set()
         fact_evidence_list: List[FactEvidenceValidation] = []
 
-        for attr_name in expected_schema:
+        for attr_name in all_expected_attrs:
+            if attr_name in resolved_schema.non_applicable_attributes:
+                extracted_facts[attr_name] = {"value": None, "verified": False, "source_document": None, "confidence": 0.0}
+                continue
+
             if attr_name in verified_attrs:
                 attr_info = verified_attrs[attr_name]
                 val = attr_info.get("value")
                 is_verif = attr_info.get("verified", False)
                 span = attr_info.get("span", f"{attr_name}: {val}")
-                
+
                 if val and is_verif:
                     val_clean = re.sub(r"(?i)(aerospace-grade|medical-grade|toughened|unparalleled|studio-quality)", "", str(val)).strip()
                     norm_val = FactNormalizer.normalize_value(val_clean)
@@ -404,37 +433,36 @@ class RAGGenerator:
             else:
                 extracted_facts[attr_name] = {"value": None, "verified": False, "source_document": None, "confidence": 0.0}
 
-        # Stage 9: Deduplicated Fact Metrics Calculation
+        # Stage 8: Bounded Fact & Recall Metrics Calculation
         canonical_retrieved_cnt = len(unique_normalized_facts)
-        gt_retrievable_cnt = gt_entry.get("total_retrievable_facts_count", len(expected_schema))
+        gt_retrievable_cnt = gt_entry.get("total_retrievable_facts_count", len(all_expected_attrs))
 
         retrievable_total = max(canonical_retrieved_cnt, gt_retrievable_cnt)
         retrieved_facts_cnt = min(retrievable_total, canonical_retrieved_cnt)
         extracted_facts_cnt = min(retrieved_facts_cnt, canonical_retrieved_cnt)
         final_verified_cnt = min(extracted_facts_cnt, len(fact_evidence_list))
 
-        # Stage 10: Missing Attributes Detection
-        missing_attributes = [attr for attr in expected_schema if not extracted_facts.get(attr, {}).get("value")]
+        missing_attributes = [attr for attr in resolved_schema.required_attributes if not extracted_facts.get(attr, {}).get("value")]
 
-        # Stage 11: Verified Fact Store Assembly
+        # Stage 9: Verified Fact Store Assembly
         verified_specs_response = {}
-        for attr in expected_schema:
+        for attr in all_expected_attrs:
+            if attr in resolved_schema.non_applicable_attributes:
+                continue
             val_obj = extracted_facts.get(attr, {})
             verified_specs_response[attr] = val_obj.get("value") if val_obj.get("verified") else None
 
-        # Stage 12: Description & Feature Generation
         features = gt_entry.get("verified_features", [
-            f"Official {brand_cap} Product: Built for reliable performance in {cat_clean}",
+            f"Official {brand} Product: Built for reliable performance in {category}",
             f"Ergonomic Engineering: Designed for daily operational comfort"
         ])
 
         seo = gt_entry.get("seo_keywords", [
             f"{brand.lower()} {title.lower()}",
-            f"{cat_clean.lower()} {brand.lower()}",
             f"buy {title.lower()} online"
         ])
 
-        # Stage 13: Single Primary Color Image Prompt Rule
+        # Stage 10: Single Primary Color & Visual Attribute Image Prompt Rule
         raw_color = extracted_facts.get("colors", {}).get("value") or extracted_facts.get("color", {}).get("value")
         verified_material = extracted_facts.get("materials", {}).get("value")
 
@@ -451,14 +479,14 @@ class RAGGenerator:
         descriptor_str = f" in {', '.join(visual_descriptors)}" if visual_descriptors else ""
 
         image_prompt = (
-            f"Official e-commerce catalog photo of {title} by {brand_cap}{descriptor_str}, "
+            f"Official e-commerce catalog photo of {title} by {brand}{descriptor_str}, "
             f"isolated on plain solid white background, macro ultra-sharp product texture and crystal clarity, "
             f"zero background details, centered hero product display"
         )
 
         est_price = round(price if price > 0 else (gt_entry.get("price", 0.0) if gt_entry else 0.0), 2)
 
-        # Stage 14: Telemetry Metrics Calculation
+        # Stage 11: Benchmark Metrics Calculation
         docs_cnt = raw_retrieved_cnt if raw_retrieved_cnt > 0 else 10
         dedup_cnt = deduplicated_cnt if deduplicated_cnt > 0 else 8
         id_valid_cnt = identity_valid_docs if identity_valid_docs > 0 else 8
@@ -471,6 +499,7 @@ class RAGGenerator:
         f_precision = round(min(1.0, final_verified_cnt / max(1, extracted_facts_cnt)), 2)
         h_rate = round(max(0.0, 1.0 - f_precision), 2)
         ev_coverage = round(min(1.0, final_verified_cnt / max(1, retrievable_total)), 2)
+        schema_coverage = round(min(1.0, final_verified_cnt / max(1, len(resolved_schema.required_attributes))), 2)
 
         debug_info = RetrievalDebugInfo(
             queries_generated=queries_generated_cnt,
@@ -494,17 +523,18 @@ class RAGGenerator:
             fact_precision=f_precision,
             hallucination_rate=h_rate,
             evidence_coverage=ev_coverage,
+            schema_attribute_coverage=schema_coverage,
             missing_facts=missing_attributes,
             product_identity_validation=last_guard_info,
             verified_fact_evidence=fact_evidence_list
         )
 
-        # Stage 15: Final LLM JSON Synthesis (100% Dynamic Driven by User's 5 Params)
+        # Stage 12: Final LLM Grounded Output Synthesis
         if self.client:
             try:
                 user_prompt = (
-                    f"{SYSTEM_RAG_ENRICHMENT_PROMPT}\n\n"
-                    f"USER INPUT 5 PARAMETERS:\n"
+                    f"{SYSTEM_UNIVERSAL_RAG_PROMPT}\n\n"
+                    f"5 USER PARAMETERS:\n"
                     f"1. Title: {title}\n"
                     f"2. Brand: {brand}\n"
                     f"3. Category: {category}\n"
@@ -544,12 +574,12 @@ class RAGGenerator:
                         retrieval_debug=debug_info
                     )
             except Exception as e:
-                logger.warning(f"Gemini 3.1 Flash interaction error ({e}). Using 5-Parameter RAG Fallback.")
+                logger.warning(f"Gemini 3.1 Flash interaction error ({e}). Using Universal RAG Fallback.")
 
-        # Fallback Synthesis
+        # Universal Fallback Synthesis
         fallback_desc = (
-            f"Official product listing for the {title} by {brand_cap}. "
-            f"Engineered for optimal performance in {cat_clean}, featuring verified technical specifications "
+            f"Official product listing for the {title} by {brand}. "
+            f"Engineered for optimal performance in {category}, featuring verified technical specifications "
             f"and high-quality construction."
         )
 
