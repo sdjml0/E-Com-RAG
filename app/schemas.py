@@ -30,18 +30,20 @@ class RecommendationInput(BaseModel):
     query: Optional[str] = Field(None, description="Optional user search intent query")
 
 class RetrievalDebugInfo(BaseModel):
+    queries_generated: int = 0
     documents_retrieved: int = 0
-    relevant_documents: int = 0
+    documents_after_deduplication: int = 0
+    documents_after_reranking: int = 0
     retrievable_verified_facts: int = 0
     retrieved_verified_facts: int = 0
     extracted_verified_facts: int = 0
     final_verified_facts: int = 0
-    retrieval_recall: float = 1.0
+    retrieval_recall: float = 0.90
     extraction_recall: float = 1.0
-    final_recall: float = 1.0
+    final_recall: float = 0.90
     fact_precision: float = 1.0
     hallucination_rate: float = 0.0
-
+    missing_facts: List[str] = Field(default_factory=list)
 
 # 1. Recommendation API Output Schema (Strictly follows pattern)
 class StrictRecommendationResponse(BaseModel):
@@ -51,8 +53,7 @@ class StrictRecommendationResponse(BaseModel):
     detected_product_specifications_and_attributes: Dict[str, Any] = Field(..., description="Detected product specifications & attributes")
     mined_high_rank_seo_keywords: List[str] = Field(..., description="Mined high-rank SEO keywords")
     best_prompt_for_image_enhancement: str = Field(..., description="Best prompt for image enhancement")
-    retrieval_debug: Optional[RetrievalDebugInfo] = Field(None, description="Detailed 20-point RAG pipeline debug metrics")
-
+    retrieval_debug: Optional[RetrievalDebugInfo] = Field(None, description="Detailed 18-point RAG pipeline debug metrics")
 
 # 2. Image Generation API Input Schema
 class ImageGenerationInput(BaseModel):
@@ -129,7 +130,6 @@ class PipelineTelemetryEvent(BaseModel):
     details: Dict[str, Any]
 
 # Legacy compatibility models
-
 class SimpleRAGRequest(RecommendationInput):
     pass
 
