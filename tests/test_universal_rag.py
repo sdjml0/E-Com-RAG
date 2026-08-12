@@ -62,3 +62,14 @@ async def test_universal_rag_benchmark_suite():
         assert dbg.hallucination_rate <= 1.0
         assert dbg.evidence_coverage <= 1.0
         assert len(dbg.verified_fact_evidence or []) >= 1
+
+        if "CeraVe" in req.brand:
+            detected = res.detected_product_specifications_and_attributes
+            assert "part_number" not in detected
+            assert "fitment" not in detected
+            assert "vehicle_position" not in detected
+            assert "oem_compatibility" not in detected
+            assert dbg.schema_domain_accuracy == 1.0
+            assert dbg.non_applicable_precision == 1.0
+            assert dbg.query_quality_telemetry is not None
+

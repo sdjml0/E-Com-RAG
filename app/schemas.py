@@ -46,6 +46,16 @@ class AttributeCoverageMatrixEntry(BaseModel):
     evidence_type: str = "EXACT_PRODUCT_EVIDENCE"
     source_authority: str = "Manufacturer specification"
 
+class QueryQualityTelemetry(BaseModel):
+    query_type: str
+    attribute: str
+    domain: str
+    synonyms_used: List[str] = Field(default_factory=list)
+    documents_returned: int = 0
+    identity_valid: int = 0
+    attribute_found: bool = False
+    attribute_verified: bool = False
+
 class FactEvidenceValidation(BaseModel):
     attribute: str
     requirement_tier: str = "Required"
@@ -86,12 +96,16 @@ class RetrievalDebugInfo(BaseModel):
     hallucination_rate: float = 0.0
     evidence_coverage: float = 1.0
     schema_attribute_coverage: float = 1.0
+    schema_domain_accuracy: float = 1.0
+    non_applicable_precision: float = 1.0
     source_authority_score: float = 1.0
     conflict_detected: bool = False
     missing_facts: List[str] = Field(default_factory=list)
     product_identity_validation: Optional[ProductIdentityValidationInfo] = None
     attribute_coverage_matrix: Optional[List[AttributeCoverageMatrixEntry]] = None
     verified_fact_evidence: Optional[List[FactEvidenceValidation]] = None
+    query_quality_telemetry: Optional[List[QueryQualityTelemetry]] = None
+
 
 
 
