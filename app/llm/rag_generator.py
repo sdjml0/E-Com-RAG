@@ -488,19 +488,36 @@ class RAGGenerator:
                     )
                 )
 
-        # Stage 8: Attribute Coverage Analyzer
-        missing_required = [attr for attr in resolved_schema.required_attributes if not extracted_facts.get(attr, {}).get("value")]
+        # Stage 8: Active Attribute Coverage Audit ("Which facts am I missing?")
 
-        # Stage 9: Targeted Secondary Retrieval Pass (MAX 1-2 Rounds if Missing Required Attributes)
-        if missing_required:
-            sec_queries = [f"{brand} {title} {category_schema_resolver.get_attribute_synonyms(attr)[0]}" for attr in missing_required[:3]]
+        missing_required = [attr for attr in resolved_schema.required_attributes if not extracted_facts.get(attr, {}).get("value")]
+        missing_recommended = [attr for attr in resolved_schema.recommended_attributes if not extracted_facts.get(attr, {}).get("value")]
+        missing_target_attrs = missing_required + missing_recommended[:3]
+
+        # Stage 9: Active Fact Recovery Cycle ("Search specifically for those missing facts")
+        if missing_target_attrs:
+            sec_queries = []
+            for target_attr in missing_target_attrs[:4]:
+                synonyms = category_schema_resolver.get_attribute_synonyms(target_attr)
+                for syn in synonyms[:2]:
+                    sec_queries.append(f"{brand} {title} {syn}")
+
             sec_hits, sec_raw, sec_dedup = await self._execute_hybrid_multi_query_retrieval(
-                sec_queries, brand=brand, category=category, top_k=10
+                sec_queries, brand=brand, category=category, top_k=15
             )
             if sec_hits:
-                sec_valid = [h for h in sec_hits if ProductIdentityGuard.validate_identity_and_variant(getattr(h, "prod_title", ""), getattr(h, "category", ""), title, brand, category).accepted]
+                sec_valid = [
+                    h for h in sec_hits
+                    if ProductIdentityGuard.validate_identity_and_variant(
+                        getattr(h, "prod_title", ""), getattr(h, "category", ""), title, brand, category
+                    ).accepted
+                ]
                 if sec_valid:
-                    top_evidence_chunks.extend(sec_valid[:4])
+                    # Expand retained evidence set with newly discovered targeted chunks
+                    top_evidence_chunks.extend(sec_valid[:5])
+                    after_reranking_cnt = len(top_evidence_chunks)
+
+                    # Re-extract facts dynamically with expanded evidence
                     gt_entry = await self._extract_facts_dynamically(
                         title, brand, category, price, prod_image_url, top_evidence_chunks, resolved_schema
                     )
@@ -514,18 +531,21 @@ class RAGGenerator:
                         if attr_name in resolved_schema.non_applicable_attributes:
                             extracted_facts[attr_name] = {"value": None, "verified": False, "source_document": None, "confidence": 0.0}
                             continue
+
                         req_tier = "Required" if attr_name in resolved_schema.required_attributes else ("Recommended" if attr_name in resolved_schema.recommended_attributes else "Optional")
                         if attr_name in verified_attrs:
                             attr_info = verified_attrs[attr_name]
                             val = attr_info.get("value")
                             is_verif = attr_info.get("verified", False)
                             span = attr_info.get("span", f"{attr_name}: {val}")
+
                             if val and is_verif:
                                 val_clean = re.sub(r"(?i)(aerospace-grade|medical-grade|toughened|unparalleled|studio-quality)", "", str(val)).strip()
                                 norm_val = FactNormalizer.normalize_value(val_clean)
                                 if norm_val:
                                     unique_normalized_facts.add(norm_val)
                                 conf = attr_info.get("confidence", 0.98)
+
                                 extracted_facts[attr_name] = {
                                     "value": val_clean,
                                     "verified": True,
@@ -559,13 +579,26 @@ class RAGGenerator:
                                         source_authority="Manufacturer specification"
                                     )
                                 )
+                            else:
+                                extracted_facts[attr_name] = {"value": None, "verified": False, "source_document": None, "confidence": 0.0}
+                                attribute_coverage_matrix.append(
+                                    AttributeCoverageMatrixEntry(
+                                        attribute=attr_name,
+                                        requirement_tier=req_tier,
+                                        retrieved=False,
+                                        verified=False,
+                                        confidence=0.0,
+                                        evidence_type="INFERENCE",
+                                        source_authority="Unverified"
+                                    )
+                                )
 
         # Stage 10: Verified Fact Store Assembly & Metrics Calculation
-        canonical_retrieved_cnt = len(unique_normalized_facts)
         gt_retrievable_cnt = gt_entry.get("total_retrievable_facts_count", len(all_expected_attrs))
-
+        canonical_retrieved_cnt = len(unique_normalized_facts)
         retrievable_total = max(canonical_retrieved_cnt, gt_retrievable_cnt)
         retrieved_facts_cnt = min(retrievable_total, canonical_retrieved_cnt)
+
         extracted_facts_cnt = min(retrieved_facts_cnt, canonical_retrieved_cnt)
         final_verified_cnt = min(extracted_facts_cnt, len(fact_evidence_list))
 
