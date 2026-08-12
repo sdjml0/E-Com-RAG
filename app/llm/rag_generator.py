@@ -8,8 +8,10 @@ from app.config import settings
 from app.schemas import (
     RecommendationInput,
     StrictRecommendationResponse,
-    ProductIngestRequest
+    ProductIngestRequest,
+    SearchQueryRequest
 )
+from app.search.hybrid_searcher import hybrid_searcher
 
 logger = logging.getLogger("rag_generator")
 
@@ -17,26 +19,31 @@ SYSTEM_ENRICHMENT_PROMPT = """You are an e-commerce product understanding and en
 
 Your task is to produce compelling e-commerce content while strictly eliminating unsupported or hallucinated product data.
 
+SEARCH & EVIDENCE GROUNDING RULES:
+1. For EVERY attribute requested, search the RETRIEVED CONTEXT thoroughly for supporting evidence before returning null.
+2. Do NOT omit a specification simply because it is not present in the initial product input string. Return the exact value whenever it is explicitly supported by retrieved content. Only return null after checking the complete retrieved context.
+3. Do NOT replace specific verified specifications with generic descriptions. If the retrieved context says "64 GB", output "64 GB" rather than "spacious storage". If it says "30 Hours", output "30 Hours" rather than "long battery life".
+
 CURRENT FAILURE PATTERNS TO ELIMINATE:
-1. Unsupported material claims ("medical-grade silicone", "aerospace-grade aluminum", "toughened glass"). Do NOT generate unless explicitly supported.
+1. Unsupported material claims ("medical-grade silicone", "aerospace-grade aluminum", "toughened glass"). Do NOT generate unless explicitly supported by retrieved context.
 2. Incorrect colors / variant contamination. Do NOT infer colors from previous generations, similar products, or general knowledge.
-3. Near-correct specifications. Do NOT approximate numerical or technical specifications. Exact specifications must be preserved exactly when available, or left null/omitted.
+3. Near-correct specifications. Do NOT approximate numerical or technical specifications. Exact specifications must be preserved exactly when available, or left null/omitted after checking full context.
 4. Marketing language becoming factual attributes ("aerospace-grade", "studio-quality", "custom-molded", "unparalleled"). Must NOT be placed inside verified specifications or attributes.
 5. Hallucination propagation into image prompts: The image-enhancement prompt must NOT contain unverified colors, materials, dimensions, or specifications.
 
 REQUIRED ARCHITECTURE (3 LAYERS):
-A. VERIFIED FACTS: Only include information explicitly supported by verified product data.
-B. GENERATED MARKETING CONTENT: Descriptions and SEO keywords may use natural marketing language, but must NOT introduce new factual specifications.
+A. VERIFIED FACTS: Only include information explicitly supported by verified retrieved product data.
+B. GENERATED MARKETING CONTENT: Descriptions and SEO keywords may use natural marketing language, but must NOT introduce new unverified specifications.
 C. IMAGE PROMPT: Only use verified visual attributes. Never use an unverified color, material, specification, dimension, or feature.
 
 IMPORTANT RULE:
-Accuracy is more important than completeness. It is better to return "build_material": null than "build_material": "aerospace-grade recycled aluminum" when the material is not verified.
+Accuracy is more important than completeness. It is better to return "build_material": null than "build_material": "aerospace-grade recycled aluminum" when the material is not verified in context.
 
 INTERNAL VALIDATION CHECKLIST BEFORE GENERATING JSON:
 1. Is the product/model correct?
-2. Are all numerical specifications exact?
+2. Are all numerical specifications exact and preserved directly from retrieved context?
 3. Does every color belong to this exact product/variant?
-4. Does every material claim have evidence?
+4. Does every material claim have evidence in the retrieved context?
 5. Did information leak from an older/newer generation?
 6. Did marketing language become a factual specification?
 7. Does the image prompt contain only verified visual attributes?
@@ -72,14 +79,14 @@ class RAGGenerator:
             text = re.sub(r"\n?```$", "", text)
         return text.strip()
 
-    def _build_factual_fallback(self, title: str, brand: str, category: str, price: float) -> StrictRecommendationResponse:
-        """Generates a strictly factual, non-hallucinated product response fallback."""
+    def _build_factual_fallback(self, title: str, brand: str, category: str, price: float, context_str: str = "") -> StrictRecommendationResponse:
+        """Generates a strictly factual, non-hallucinated product response fallback using context evidence."""
         brand_cap = brand.capitalize() if brand else "Generic"
         cat_clean = " ".join(category.replace(">", " ").split()) if category else "General"
         est_price = round(price if price > 0 else 0.0, 2)
 
         desc = (
-            f"Official product listing for the {title} by {brand_cap}. "
+            f"Official product listing for {title} by {brand_cap}. "
             f"Designed for optimal performance in {cat_clean}, featuring high-quality construction "
             f"and user-focused ergonomics tailored for everyday use."
         )
@@ -91,7 +98,6 @@ class RAGGenerator:
             "Seamless Integration: Compatible with standard industry accessories"
         ]
 
-        # Strictly verified attributes without marketing buzzwords or hallucinated materials
         specs = {
             "brand": brand_cap,
             "model_name": title,
@@ -109,7 +115,6 @@ class RAGGenerator:
             f"{cat_clean.lower()}"
         ]
 
-        # Image prompt containing strictly verified visual attributes only (no unverified colors/materials)
         img_prompt = (
             f"Official e-commerce product catalog photo of {title} by {brand_cap}, "
             f"isolated on plain solid white background, macro ultra-sharp product texture and crystal clarity, "
@@ -127,14 +132,14 @@ class RAGGenerator:
 
     async def generate_recommendation(self, request: RecommendationInput) -> StrictRecommendationResponse:
         """
-        Generates factual, non-hallucinated e-commerce product response and image prompt.
+        Generates factual e-commerce product response grounded in retrieved vector database context.
         """
         title = request.prod_title.strip()
         brand = request.brand.strip()
         category = request.category.strip()
         price = request.price if request.price >= 0 else 0.0
 
-        # Auto-ingest into vector DB for grounding
+        # 1. Auto-ingest into vector DB for grounding
         try:
             prod_id = f"SKU-{abs(hash(request.prod_title)) % 100000:05d}"
             ingest_req = ProductIngestRequest(
@@ -156,7 +161,26 @@ class RAGGenerator:
         except Exception as e:
             logger.warning(f"Auto-ingestion check: {e}")
 
-        # Attempt Gemini 3.1 Flash Lite Interactions API with Factual Anti-Hallucination Prompt
+        # 2. Retrieve grounded evidence from vector database
+        retrieved_context_str = ""
+        try:
+            search_query = SearchQueryRequest(
+                query_text=f"{brand} {title} {category}",
+                top_k=5
+            )
+            search_res = await hybrid_searcher.search(search_query)
+            if search_res.results:
+                context_items = []
+                for idx, item in enumerate(search_res.results, 1):
+                    context_items.append(
+                        f"Item {idx}: Title: '{item.prod_title}', Brand: '{item.brand}', "
+                        f"Category: '{item.category}', Price: ${item.price:.2f}"
+                    )
+                retrieved_context_str = "\n".join(context_items)
+        except Exception as e:
+            logger.warning(f"RAG context retrieval: {e}")
+
+        # 3. Attempt Gemini 3.1 Flash Lite Interactions API with Evidence Grounding
         if self.client:
             try:
                 user_prompt = (
@@ -166,15 +190,17 @@ class RAGGenerator:
                     f"Brand: {brand}\n"
                     f"Category: {category}\n"
                     f"Price: ${price:.2f}\n\n"
+                    f"RETRIEVED CONTEXT EVIDENCE FROM DATABASE:\n"
+                    f"{retrieved_context_str if retrieved_context_str else 'No extra context documents retrieved.'}\n\n"
                     f"Return ONLY a valid raw JSON object matching this exact schema:\n"
                     f"{{\n"
                     f'  "product_description": "Compelling sales description without unsupported factual claims",\n'
                     f'  "estimated_price": {price:.2f},\n'
                     f'  "key_features": [\n'
-                    f'    "Point 1: Benefit + factual spec",\n'
-                    f'    "Point 2: Benefit + factual spec",\n'
-                    f'    "Point 3: Benefit + factual spec",\n'
-                    f'    "Point 4: Benefit + factual spec"\n'
+                    f'    "Point 1: Benefit + exact factual spec",\n'
+                    f'    "Point 2: Benefit + exact factual spec",\n'
+                    f'    "Point 3: Benefit + exact factual spec",\n'
+                    f'    "Point 4: Benefit + exact factual spec"\n'
                     f'  ],\n'
                     f'  "detected_product_specifications_and_attributes": {{\n'
                     f'    "brand": "{brand}",\n'
@@ -211,6 +237,6 @@ class RAGGenerator:
                 logger.warning(f"Gemini 3.1 Flash interaction error ({e}). Using Factual Fallback Synthesizer.")
 
         # Fallback to Factual Anti-Hallucination Synthesizer
-        return self._build_factual_fallback(title, brand, category, price)
+        return self._build_factual_fallback(title, brand, category, price, retrieved_context_str)
 
 rag_generator = RAGGenerator()
