@@ -44,6 +44,7 @@ async def test_image_generate_flow():
         resp = await ac.post("/api/v1/image/generate", json=payload)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] in ("success", "fallback")
+        assert data["status"] in ("success", "fallback", "success_free_ai")
         assert "generated_image_url" in data
+
 
