@@ -14,7 +14,7 @@ from app.schemas import (
 logger = logging.getLogger("rag_generator")
 
 class RAGGenerator:
-    """Next-Gen E-Commerce Ad Copy Synthesizer (Gemini 3.1 Flash Interactions + Rich Fallback)."""
+    """Next-Gen E-Commerce Ad Copy Synthesizer & Synchronized Image Prompt Generator."""
 
     def __init__(self, api_key: Optional[str] = settings.GEMINI_API_KEY):
         self.api_key = api_key
@@ -42,31 +42,31 @@ class RAGGenerator:
         return text.strip()
 
     def _build_rich_ad_fallback(self, title: str, brand: str, category: str, price: float) -> StrictRecommendationResponse:
-        """Generates a rich, point-to-point, highly attractive seller advertisement copy fallback."""
+        """Generates a rich, point-to-point seller advertisement copy with synchronized image prompt."""
         brand_cap = brand.capitalize() if brand else "Premium"
         cat_clean = " ".join(category.replace(">", " ").split()) if category else "General"
         est_price = round(price if price > 0 else 299.99, 2)
 
-
         desc = (
             f"Experience absolute craftsmanship with the {title} by {brand_cap}. "
             f"Engineered for those who refuse to compromise, this flagship model combines sleek, "
-            f"modern aesthetics with studio-grade performance to transform your daily routine into an extraordinary experience."
+            f"modern matte aesthetics with studio-grade performance to transform your daily routine into an extraordinary experience."
         )
 
         features = [
             f"🔥 Flagship {brand_cap} Craftsmanship: Engineered for peak performance and uncompromised durability",
             f"🎧 Immersive Audio & Smart Tech: Tailored specifically for modern {cat_clean} enthusiasts",
             f"⚡ Long-Lasting Battery & Fast Charge: Designed for all-day performance without interruptions",
-            f"☁️ Ultra-Lightweight Ergonomic Comfort: Premium materials crafted for long-duration wear"
+            f"☁️ Ultra-Lightweight Ergonomic Comfort: Soft fit leather and lightweight headband for long-duration wear"
         ]
 
         specs = {
             "brand": brand_cap,
             "model_name": title,
             "category": category,
-            "build_quality": "Reinforced Ergonomic Alloy",
-            "connectivity": "Wireless High-Bandwidth Bluetooth & Fast Charge",
+            "color_finish": "Matte Black / Platinum",
+            "build_material": "Reinforced Ergonomic Alloy & Soft Fit Leather",
+            "connectivity": "Wireless High-Bandwidth Bluetooth 5.3 & Fast Charge",
             "warranty_rating": "1-Year Official Manufacturer Warranty"
         }
 
@@ -78,14 +78,16 @@ class RAGGenerator:
             f"top rated {cat_clean.lower()}"
         ]
 
+        # Synchronize image prompt accurately with product description, color, and build material
+        color_finish = specs.get("color_finish", "Matte Black")
+        build_mat = specs.get("build_material", "Composite Alloy")
+        
         img_prompt = (
-            f"Official e-commerce catalog photo of {title} by {brand_cap}, "
+            f"Official e-commerce catalog photo of {title} by {brand_cap} featuring {color_finish} finish and {build_mat}, "
+            f"accurately reflecting product description ({desc[:90]}...), "
             f"isolated on plain solid white background, macro ultra-sharp product texture and crystal clarity, "
             f"zero background details, centered hero product display"
         )
-
-
-
 
         return StrictRecommendationResponse(
             product_description=desc,
@@ -98,8 +100,7 @@ class RAGGenerator:
 
     async def generate_recommendation(self, request: RecommendationInput) -> StrictRecommendationResponse:
         """
-        Generates high-converting, persuasive, point-to-point seller advertisement ad copy.
-        Uses Gemini 3.1 Flash Lite Interactions API with rich fallback protection.
+        Generates high-converting seller advertisement ad copy and synchronized accurate image enhancement prompt.
         """
         title = request.prod_title.strip()
         brand = request.brand.strip()
@@ -128,7 +129,7 @@ class RAGGenerator:
         except Exception as e:
             logger.warning(f"Auto-ingestion check: {e}")
 
-        # Attempt Gemini 3.1 Flash Lite Interactions API for Rich Ad Copy Generation
+        # Attempt Gemini 3.1 Flash Lite Interactions API for Synchronized Ad Copy & Image Prompt Generation
         if self.client:
             try:
                 prompt = (
@@ -138,9 +139,12 @@ class RAGGenerator:
                     f"Brand: {brand}\n"
                     f"Category: {category}\n"
                     f"Price: ${price:.2f}\n\n"
+                    f"CRITICAL INSTRUCTION FOR IMAGE PROMPT:\n"
+                    f"The 'best_prompt_for_image_enhancement' MUST directly follow and align with the generated product_description, "
+                    f"color, and build material specs. It must describe an official catalog photo of the exact product on a plain solid white background.\n\n"
                     f"Return ONLY a valid raw JSON object matching this exact schema:\n"
                     f"{{\n"
-                    f'  "product_description": "High-impact, highly attractive sales ad description (2-3 punchy, persuasive sentences that make customers want to buy immediately)",\n'
+                    f'  "product_description": "High-impact sales ad description (2-3 punchy sentences highlighting material and design)",\n'
                     f'  "estimated_price": {price:.2f},\n'
                     f'  "key_features": [\n'
                     f'    "🎧 Feature 1: Point-to-point attractive benefit + spec",\n'
@@ -152,14 +156,13 @@ class RAGGenerator:
                     f'    "brand": "{brand}",\n'
                     f'    "model": "{title}",\n'
                     f'    "category": "{category}",\n'
-                    f'    "key_spec_1": "value",\n'
-                    f'    "key_spec_2": "value"\n'
+                    f'    "color_finish": "exact color from description",\n'
+                    f'    "build_material": "exact material from description"\n'
                     f'  }},\n'
                     f'  "mined_high_rank_seo_keywords": [\n'
                     f'    "keyword 1", "keyword 2", "keyword 3", "keyword 4"\n'
                     f'  ],\n'
-                    f'  "best_prompt_for_image_enhancement": "High-end commercial e-commerce product catalog photo, isolated on seamless pure white studio background, bright softbox commercial studio lighting, centered hero composition, 8k resolution, professional online marketplace listing photo"\n'
-
+                    f'  "best_prompt_for_image_enhancement": "Official e-commerce catalog photo of {title} by {brand} in [color_finish] [build_material] matching description, isolated on plain solid white background, macro ultra-sharp product texture and crystal clarity, zero background details, centered hero product display"\n'
                     f"}}\n"
                 )
 
@@ -183,7 +186,7 @@ class RAGGenerator:
             except Exception as e:
                 logger.warning(f"Gemini 3.1 Flash interaction error ({e}). Using Rich Ad Synthesizer fallback.")
 
-        # Fallback to Rich Seller Advertisement Copy Synthesizer
+        # Fallback to Synchronized Ad Copy Synthesizer
         return self._build_rich_ad_fallback(title, brand, category, price)
 
 rag_generator = RAGGenerator()
