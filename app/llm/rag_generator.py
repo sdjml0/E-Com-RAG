@@ -433,7 +433,62 @@ class RAGGenerator:
             else:
                 extracted_facts[attr_name] = {"value": None, "verified": False, "source_document": None, "confidence": 0.0}
 
-        # Stage 8: Bounded Fact & Recall Metrics Calculation
+        # Stage 8: Attribute Coverage Analyzer
+        missing_attributes = [attr for attr in resolved_schema.required_attributes if not extracted_facts.get(attr, {}).get("value")]
+
+        # Stage 9: Targeted Secondary Retrieval Pass (MAX 1-2 Rounds if Missing Required Attributes)
+        if missing_attributes:
+            secondary_queries = [f"{brand} {title} official {attr} specifications" for attr in missing_attributes[:3]]
+            sec_hits, sec_raw, sec_dedup = await self._execute_multi_query_retrieval(
+                secondary_queries, brand=brand, category=category, top_k=5
+            )
+            if sec_hits:
+                sec_valid = [h for h in sec_hits if ProductIdentityGuard.validate_identity(getattr(h, "prod_title", ""), getattr(h, "category", ""), title, brand, category).accepted]
+                if sec_valid:
+                    top_evidence_chunks.extend(sec_valid[:3])
+                    # Re-extract facts with expanded evidence
+                    gt_entry = await self._extract_facts_dynamically(
+                        title, brand, category, price, prod_image_url, top_evidence_chunks, resolved_schema
+                    )
+                    verified_attrs = gt_entry.get("verified_attributes", {})
+
+                    # Re-populate extracted facts
+                    fact_evidence_list.clear()
+                    unique_normalized_facts.clear()
+                    for attr_name in all_expected_attrs:
+                        if attr_name in resolved_schema.non_applicable_attributes:
+                            extracted_facts[attr_name] = {"value": None, "verified": False, "source_document": None, "confidence": 0.0}
+                            continue
+                        if attr_name in verified_attrs:
+                            attr_info = verified_attrs[attr_name]
+                            val = attr_info.get("value")
+                            is_verif = attr_info.get("verified", False)
+                            span = attr_info.get("span", f"{attr_name}: {val}")
+                            if val and is_verif:
+                                val_clean = re.sub(r"(?i)(aerospace-grade|medical-grade|toughened|unparalleled|studio-quality)", "", str(val)).strip()
+                                norm_val = FactNormalizer.normalize_value(val_clean)
+                                if norm_val:
+                                    unique_normalized_facts.add(norm_val)
+                                extracted_facts[attr_name] = {
+                                    "value": val_clean,
+                                    "verified": True,
+                                    "source_document": doc_id,
+                                    "confidence": attr_info.get("confidence", 0.98)
+                                }
+                                fact_evidence_list.append(
+                                    FactEvidenceValidation(
+                                        attribute=attr_name,
+                                        normalized_value=norm_val,
+                                        source_document_id=doc_id,
+                                        evidence_span=span,
+                                        product_identity_validation=True,
+                                        category_validation=True,
+                                        generation_validation=True,
+                                        verified_status=True
+                                    )
+                                )
+
+        # Stage 10: Verified Fact Store Assembly & Metrics Calculation
         canonical_retrieved_cnt = len(unique_normalized_facts)
         gt_retrievable_cnt = gt_entry.get("total_retrievable_facts_count", len(all_expected_attrs))
 
@@ -444,10 +499,10 @@ class RAGGenerator:
 
         missing_attributes = [attr for attr in resolved_schema.required_attributes if not extracted_facts.get(attr, {}).get("value")]
 
-        # Stage 9: Verified Fact Store Assembly
         verified_specs_response = {}
         for attr in all_expected_attrs:
             if attr in resolved_schema.non_applicable_attributes:
+
                 continue
             val_obj = extracted_facts.get(attr, {})
             verified_specs_response[attr] = val_obj.get("value") if val_obj.get("verified") else None
