@@ -39,13 +39,16 @@ class ProductIdentityValidationInfo(BaseModel):
 
 class FactEvidenceValidation(BaseModel):
     attribute: str
+    requirement_tier: str = "Required"
     normalized_value: str
     source_document_id: str
     evidence_span: str
+    confidence: float = 0.98
     product_identity_validation: bool = True
     category_validation: bool = True
     generation_validation: bool = True
     verified_status: bool = True
+
 
 class RetrievalDebugInfo(BaseModel):
     queries_generated: int = 0

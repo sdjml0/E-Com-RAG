@@ -416,12 +416,17 @@ class RAGGenerator:
                         "confidence": attr_info.get("confidence", 0.98)
                     }
 
+                    req_tier = "Required" if attr_name in resolved_schema.required_attributes else ("Recommended" if attr_name in resolved_schema.recommended_attributes else "Optional")
+                    conf = attr_info.get("confidence", 0.98)
+
                     fact_evidence_list.append(
                         FactEvidenceValidation(
                             attribute=attr_name,
+                            requirement_tier=req_tier,
                             normalized_value=norm_val,
                             source_document_id=doc_id,
                             evidence_span=span,
+                            confidence=conf,
                             product_identity_validation=True,
                             category_validation=True,
                             generation_validation=True,
@@ -475,18 +480,23 @@ class RAGGenerator:
                                     "source_document": doc_id,
                                     "confidence": attr_info.get("confidence", 0.98)
                                 }
+                                sec_req_tier = "Required" if attr_name in resolved_schema.required_attributes else ("Recommended" if attr_name in resolved_schema.recommended_attributes else "Optional")
+                                sec_conf = attr_info.get("confidence", 0.98)
                                 fact_evidence_list.append(
                                     FactEvidenceValidation(
                                         attribute=attr_name,
+                                        requirement_tier=sec_req_tier,
                                         normalized_value=norm_val,
                                         source_document_id=doc_id,
                                         evidence_span=span,
+                                        confidence=sec_conf,
                                         product_identity_validation=True,
                                         category_validation=True,
                                         generation_validation=True,
                                         verified_status=True
                                     )
                                 )
+
 
         # Stage 10: Verified Fact Store Assembly & Metrics Calculation
         canonical_retrieved_cnt = len(unique_normalized_facts)
