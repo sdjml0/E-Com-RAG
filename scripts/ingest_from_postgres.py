@@ -2,31 +2,18 @@
 """
 Secure PostgreSQL Ingestion Tool for Multimodal E-Commerce RAG Engine.
 
-Features:
-  1. SECURE: Reads database connection details from .env (DATABASE_URL or POSTGRES_*) without exposing passwords.
-  2. MULTI-TABLE: Supports custom SQL JOIN queries across multiple database tables (e.g. products JOIN categories JOIN brands).
+Pre-configured for Amazon & Flipkart Datasets:
+  - Table 1: amazon_sales_data_uncleaned
+  - Table 2: "flipkart_com-ecommerce_sample"
 
 Usage:
-    # Uses DATABASE_URL from .env automatically
-    python scripts/ingest_from_postgres.py
-
-    # Or specify custom SQL JOIN query for normalized multi-table database schemas
-    python scripts/ingest_from_postgres.py --query "
-        SELECT 
-            p.id as product_id, 
-            p.title as prod_title, 
-            p.image_url as prod_image_url, 
-            p.price, 
-            c.name as category, 
-            b.name as brand 
-        FROM products p 
-        LEFT JOIN categories c ON p.category_id = c.id 
-        LEFT JOIN brands b ON p.brand_id = b.id
-    "
+    # Run automatic ingestion for Amazon & Flipkart tables (credentials read from .env)
+    python scripts/ingest_from_postgres.py --preset ecom_all
 """
 
 import os
 import sys
+import re
 import argparse
 import asyncio
 import logging
@@ -51,7 +38,6 @@ def get_database_url() -> str:
     if db_url:
         return db_url
 
-    # Fallback to individual POSTGRES_* environment variables
     user = os.getenv("POSTGRES_USER", "postgres")
     password = os.getenv("POSTGRES_PASSWORD", "")
     host = os.getenv("POSTGRES_HOST", "localhost")
@@ -62,11 +48,23 @@ def get_database_url() -> str:
         return f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
     return f"postgresql://{user}@{host}:{port}/{dbname}"
 
-def fetch_postgres_data(query_sql: str, limit: int = 100000) -> List[Dict[str, Any]]:
-    """Executes secure SQL query across single or multiple joined tables in PostgreSQL."""
-    db_url = get_database_url()
+def parse_price_value(val: Any) -> float:
+    """Cleans currency strings like '$398.00', '₹2,999', or None into a clean float."""
+    if val is None:
+        return 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    s = str(val).strip()
+    clean = re.sub(r"[^\d.]", "", s)
+    try:
+        return float(clean) if clean else 0.0
+    except ValueError:
+        return 0.0
+
+def fetch_table_records(db_url: str, table_name: str, query_sql: str) -> List[Dict[str, Any]]:
+    """Executes SQL query for a specific dataset table."""
     products = []
-    logger.info("Executing secure PostgreSQL data fetch...")
+    logger.info(f"Querying PostgreSQL table '{table_name}'...")
 
     try:
         import psycopg2
@@ -74,38 +72,41 @@ def fetch_postgres_data(query_sql: str, limit: int = 100000) -> List[Dict[str, A
 
         conn = psycopg2.connect(db_url, cursor_factory=RealDictCursor)
         with conn.cursor() as cur:
-            full_query = f"{query_sql} LIMIT %s" if "LIMIT" not in query_sql.upper() else query_sql
-            if "LIMIT" not in query_sql.upper():
-                cur.execute(full_query, (limit,))
-            else:
-                cur.execute(full_query)
+            cur.execute(query_sql)
             rows = cur.fetchall()
             for r in rows:
+                p_id = str(r.get("product_id") or r.get("uniq_id") or r.get("id") or f"SKU-{len(products):06d}")
+                title = str(r.get("prod_title") or r.get("product_name") or r.get("title") or "Product")
+                img = str(r.get("prod_image_url") or r.get("img_link") or r.get("image") or r.get("image_url") or "https://images.unsplash.com/photo-1505740420928-5e560c06d30e")
+                
+                # Parse image array strings if stored as ["http://..."]
+                if img.startswith("[") and "http" in img:
+                    urls = re.findall(r"https?://[^\s\"'\]]+", img)
+                    if urls:
+                        img = urls[0]
+
+                raw_price = r.get("price") or r.get("discounted_price") or r.get("actual_price") or r.get("retail_price")
+                price = parse_price_value(raw_price)
+
+                cat = str(r.get("category") or r.get("product_category_tree") or "General")
+                if cat.startswith("["):
+                    cat = cat.replace("[", "").replace("]", "").replace('"', '').replace(">>", ">")
+
+                brand = str(r.get("brand") or title.split()[0] if title else "Generic")
+
                 products.append({
-                    "product_id": str(r.get("product_id") or r.get("id") or r.get("sku") or "SKU-PG"),
-                    "prod_title": str(r.get("prod_title") or r.get("title") or r.get("name") or "Product"),
-                    "prod_image_url": str(r.get("prod_image_url") or r.get("image_url") or r.get("image") or "https://images.unsplash.com/photo-1505740420928-5e560c06d30e"),
-                    "price": float(r.get("price") or 0.0),
-                    "category": str(r.get("category") or r.get("category_name") or "General"),
-                    "brand": str(r.get("brand") or r.get("brand_name") or "Generic")
+                    "product_id": p_id,
+                    "prod_title": title[:300],
+                    "prod_image_url": img if img.startswith("http") else "https://images.unsplash.com/photo-1505740420928-5e560c06d30e",
+                    "price": price,
+                    "category": cat[:200],
+                    "brand": brand[:100]
                 })
         conn.close()
-    except ImportError:
-        from sqlalchemy import create_engine, text
-        engine = create_engine(db_url)
-        with engine.connect() as conn:
-            result = conn.execute(text(query_sql))
-            for r in result.mappings():
-                products.append({
-                    "product_id": str(r.get("product_id") or r.get("id") or r.get("sku") or "SKU-PG"),
-                    "prod_title": str(r.get("prod_title") or r.get("title") or r.get("name") or "Product"),
-                    "prod_image_url": str(r.get("prod_image_url") or r.get("image_url") or r.get("image") or "https://images.unsplash.com/photo-1505740420928-5e560c06d30e"),
-                    "price": float(r.get("price") or 0.0),
-                    "category": str(r.get("category") or r.get("category_name") or "General"),
-                    "brand": str(r.get("brand") or r.get("brand_name") or "Generic")
-                })
+    except Exception as e:
+        logger.warning(f"Error fetching from table '{table_name}': {e}")
 
-    logger.info(f"Successfully retrieved {len(products):,} records from PostgreSQL.")
+    logger.info(f"Retrieved {len(products):,} clean product records from table '{table_name}'.")
     return products
 
 async def process_batch(batch: List[Dict[str, Any]]):
@@ -137,26 +138,44 @@ async def process_batch(batch: List[Dict[str, Any]]):
     if ingest_requests:
         await vector_db_manager.upsert_batch(ingest_requests, text_vectors, image_vectors)
 
-async def main(query_sql: str, batch_size: int = 500):
+async def main(preset: str, custom_query: str = None, batch_size: int = 500):
     await vector_db_manager.init_collection()
-    products = fetch_postgres_data(query_sql)
+    db_url = get_database_url()
+    all_products = []
+
+    if preset in ("amazon", "ecom_all"):
+        q_amazon = "SELECT * FROM amazon_sales_data_uncleaned"
+        all_products.extend(fetch_table_records(db_url, "amazon_sales_data_uncleaned", q_amazon))
+
+    if preset in ("flipkart", "ecom_all"):
+        q_flipkart = 'SELECT * FROM "flipkart_com-ecommerce_sample"'
+        all_products.extend(fetch_table_records(db_url, "flipkart_com-ecommerce_sample", q_flipkart))
+
+    if custom_query:
+        all_products.extend(fetch_table_records(db_url, "custom_query", custom_query))
+
+    if not all_products:
+        logger.warning("No records found to ingest. Check PostgreSQL connection or table names.")
+        return
+
+    logger.info(f"Total unified products to index across tables: {len(all_products):,}")
 
     start_time = time.time()
     total_processed = 0
 
-    for i in range(0, len(products), batch_size):
-        chunk = products[i:i + batch_size]
+    for i in range(0, len(all_products), batch_size):
+        chunk = all_products[i:i + batch_size]
         await process_batch(chunk)
         total_processed += len(chunk)
-        logger.info(f"Progress: {total_processed:,} / {len(products):,} products indexed into Qdrant")
+        logger.info(f"Indexed {total_processed:,} / {len(all_products):,} products into Qdrant...")
 
-    logger.info(f"✅ Secure Multi-Table Ingestion Complete! Synced {total_processed:,} products in {time.time() - start_time:.2f} seconds.")
+    logger.info(f"✅ Ingestion Complete! Synced {total_processed:,} products across tables in {time.time() - start_time:.2f} seconds.")
 
 if __name__ == "__main__":
-    default_query = "SELECT * FROM products"
-    parser = argparse.ArgumentParser(description="Secure Multi-Table PostgreSQL Ingestion Tool")
-    parser.add_argument("--query", type=str, default=default_query, help="SQL query or JOIN statement for multi-table schemas")
+    parser = argparse.ArgumentParser(description="Ingest Amazon & Flipkart PostgreSQL Tables into RAG Engine")
+    parser.add_argument("--preset", type=str, default="ecom_all", choices=["ecom_all", "amazon", "flipkart", "custom"], help="Table preset to ingest (default: ecom_all)")
+    parser.add_argument("--query", type=str, default=None, help="Custom SQL query if using preset=custom")
     parser.add_argument("--batch-size", type=int, default=500, help="Batch size for vector indexing (default: 500)")
     args = parser.parse_args()
 
-    asyncio.run(main(args.query, args.batch_size))
+    asyncio.run(main(args.preset, args.query, args.batch_size))
