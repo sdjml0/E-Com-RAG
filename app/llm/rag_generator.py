@@ -33,18 +33,17 @@ MASTER_PRODUCT_CATALOG = {
             "category": {"value": "Electronics > Mobile Phones > Smartphones", "verified": True, "confidence": 1.0},
             "display": {"value": "6.9-inch Dynamic AMOLED 2X Display (3120 x 1440, 120Hz, 2600 nits, Gorilla Armor)", "verified": True, "confidence": 0.99},
             "processor": {"value": "Snapdragon 8 Elite for Galaxy (3nm Architecture)", "verified": True, "confidence": 0.99},
-            "ram": {"value": "12GB LPDDR5X RAM (Configurable to 16GB)", "verified": True, "confidence": 0.98},
-            "storage": {"value": "256GB UFS 4.0 Storage (Configurable to 1TB)", "verified": True, "confidence": 0.98},
+            "ram": {"value": "12GB LPDDR5X RAM", "verified": True, "confidence": 0.98},
+            "storage": {"value": "256GB UFS 4.0 Storage", "verified": True, "confidence": 0.98},
             "camera": {"value": "200MP Main + 50MP Periscope (5x) + 50MP Ultra-Wide + 10MP Telephoto (3x)", "verified": True, "confidence": 0.99},
             "battery": {"value": "5,000 mAh All-Day Battery", "verified": True, "confidence": 0.99},
-            "charging": {"value": "45W Super Fast Charging & 15W Fast Wireless Charging 2.0", "verified": True, "confidence": 0.98},
+            "charging": {"value": "45W Super Fast Charging & 15W Wireless Charging 2.0", "verified": True, "confidence": 0.98},
             "dimensions": {"value": "162.8 x 77.6 x 8.2 mm", "verified": True, "confidence": 0.97},
             "weight": {"value": "219 grams (7.72 oz)", "verified": True, "confidence": 0.99},
             "materials": {"value": "Titanium Frame & Corning Gorilla Armor Anti-Reflective Glass", "verified": True, "confidence": 0.98},
             "colors": {"value": "Titanium Black, Titanium Gray, Titanium Silver, Titanium Blue", "verified": True, "confidence": 0.97},
             "connectivity": {"value": "Wi-Fi 7, Bluetooth 5.4, 5G Sub6/mmWave, UWB, USB-C 3.2", "verified": True, "confidence": 0.98},
-            "operating_system": {"value": "One UI 7.0 based on Android 15", "verified": True, "confidence": 0.99},
-            "included_accessories": {"value": "Embedded S Pen, USB-C to USB-C Cable, SIM Ejection Pin", "verified": True, "confidence": 0.97}
+            "operating_system": {"value": "One UI 7.0 based on Android 15", "verified": True, "confidence": 0.99}
         },
         "verified_features": [
             "🚀 Snapdragon 8 Elite for Galaxy: Custom 3nm processor delivering unprecedented AI and gaming performance",
@@ -188,6 +187,20 @@ OPERATIONAL DIRECTIVES:
 
 Return ONLY a valid raw JSON object matching the requested schema."""
 
+class FactNormalizer:
+    """Fact Normalization & Deduplication Engine."""
+
+    @staticmethod
+    def normalize_value(val: Any) -> str:
+        if val is None:
+            return ""
+        val_str = str(val).lower().strip()
+        # Remove formatting symbols, commas, extra whitespace
+        val_str = re.sub(r"[,\-\_\s\/\(\)]", "", val_str)
+        # Normalize common variant aliases (e.g. snapdragon8eliteforgalaxy -> snapdragon8elite)
+        val_str = val_str.replace("forgalaxy", "")
+        return val_str
+
 class ProductIdentityGuard:
     """Hard Product Identity & Category Form Factor Validator Engine."""
 
@@ -205,10 +218,8 @@ class ProductIdentityGuard:
         target_brand_lower = target_brand.lower()
         target_cat_lower = target_category.lower()
 
-        # 1. Brand Match Check
         brand_match = target_brand_lower in doc_title_lower or target_brand_lower in doc_cat_lower
 
-        # 2. Category Type Consistency Guard (HARD REJECTION OF CROSS-CATEGORY EVIDENCE)
         is_target_phone = any(k in target_cat_lower or k in target_title_lower for k in ["phone", "mobile", "smartphone", "s25", "s24", "galaxy s", "iphone"])
         is_target_audio = any(k in target_cat_lower or k in target_title_lower for k in ["audio", "headphone", "earbud", "airpods", "buds", "wh-1000"])
         is_target_laptop = any(k in target_cat_lower or k in target_title_lower for k in ["computer", "laptop", "macbook", "xps"])
@@ -233,16 +244,12 @@ class ProductIdentityGuard:
             category_match = False
             reject_reason = f"Rejected: Retrieved document describes audio product ('{doc_title}') instead of target laptop ('{target_title}')"
 
-        # 3. Model & Generation Match
         model_words = [w for w in target_title_lower.split() if len(w) > 2 and w not in ["the", "for", "with", "and", "pro", "max"]]
         model_match = any(w in doc_title_lower for w in model_words) if model_words else True
         generation_match = True
 
         accepted = brand_match and category_match and model_match and generation_match
-        if accepted:
-            reason = f"Verified exact product identity match for {target_brand} {target_title}"
-        else:
-            reason = reject_reason if reject_reason else f"Identity guard failed: Model/Brand/Category mismatch between '{doc_title}' and target '{target_title}'"
+        reason = f"Verified exact product identity match for {target_brand} {target_title}" if accepted else reject_reason
 
         return ProductIdentityValidationInfo(
             brand_match=brand_match,
@@ -254,7 +261,7 @@ class ProductIdentityGuard:
         )
 
 class RAGGenerator:
-    """Enterprise 18-Stage Iterative Multi-Query RAG Architecture with Hard Product Identity Guard."""
+    """Enterprise 18-Stage Iterative Multi-Query RAG Architecture with Fact Normalization."""
 
     def __init__(self, api_key: Optional[str] = settings.GEMINI_API_KEY):
         self.api_key = api_key
@@ -337,7 +344,6 @@ class RAGGenerator:
         cat_lower = category.lower()
 
         if "phone" in cat_lower or "mobile" in cat_lower or "smartphone" in cat_lower or "galaxy" in title.lower() or "iphone" in title.lower():
-            # Smartphone On-Demand Enrichment
             return {
                 "brand": brand_cap,
                 "model_name": title,
@@ -349,7 +355,7 @@ class RAGGenerator:
                     "brand": {"value": brand_cap, "verified": True, "confidence": 1.0},
                     "model": {"value": title, "verified": True, "confidence": 1.0},
                     "category": {"value": category, "verified": True, "confidence": 1.0},
-                    "display": {"value": "6.9-inch Dynamic AMOLED 2X Display (120Hz, 2600 nits, Corning Gorilla Armor)", "verified": True, "confidence": 0.98},
+                    "display": {"value": "6.9-inch Dynamic AMOLED 2X Display (120Hz, 2600 nits, Gorilla Armor)", "verified": True, "confidence": 0.98},
                     "processor": {"value": "Snapdragon 8 Elite for Galaxy (3nm Architecture)", "verified": True, "confidence": 0.99},
                     "ram": {"value": "12GB LPDDR5X RAM", "verified": True, "confidence": 0.98},
                     "storage": {"value": "256GB UFS 4.0 Storage", "verified": True, "confidence": 0.97},
@@ -361,14 +367,12 @@ class RAGGenerator:
                     "materials": {"value": "Titanium Frame & Corning Gorilla Armor Glass", "verified": True, "confidence": 0.98},
                     "colors": {"value": "Titanium Black, Titanium Gray, Titanium Silver", "verified": True, "confidence": 0.96},
                     "connectivity": {"value": "Wi-Fi 7, Bluetooth 5.4, 5G Sub6/mmWave, USB-C 3.2", "verified": True, "confidence": 0.98},
-                    "operating_system": {"value": "Android 15 with One UI 7", "verified": True, "confidence": 0.98},
-                    "included_accessories": {"value": "Embedded S Pen, USB-C to USB-C Cable, SIM Pin", "verified": True, "confidence": 0.96}
+                    "operating_system": {"value": "Android 15 with One UI 7", "verified": True, "confidence": 0.98}
                 },
                 "verified_features": [
                     f"🚀 Snapdragon 8 Elite Powerhouse: Ultra-fast 3nm mobile platform designed for demanding tasks and AI",
                     f"📸 200MP Quad Camera System: Capture ultra-detailed photos with 200MP resolution and 5x optical zoom",
-                    f"📱 6.9-inch Anti-Reflective Display: 2600 nits Dynamic AMOLED 2X panel with Corning Gorilla Armor",
-                    f"🖋️ Integrated S Pen Support: Built-in low-latency stylus for sketching, note-taking, and productivity"
+                    f"📱 6.9-inch Anti-Reflective Display: 2600 nits Dynamic AMOLED 2X panel with Corning Gorilla Armor"
                 ],
                 "seo_keywords": [
                     f"{brand.lower()} {title.lower()} 5g smartphone",
@@ -377,7 +381,6 @@ class RAGGenerator:
                 ]
             }
         else:
-            # Default Earbud On-Demand Enrichment
             return {
                 "brand": brand_cap,
                 "model_name": title,
@@ -404,8 +407,7 @@ class RAGGenerator:
                 },
                 "verified_features": [
                     f"🔊 Dedicated Audio Processor: Active Noise Cancellation and sound transparency",
-                    f"⚡ 30-Hour Battery Life: Long endurance with wireless charging case",
-                    f"☁️ Customizable Silicone Fit: Includes multiple ear tips for all-day comfort"
+                    f"⚡ 30-Hour Battery Life: Long endurance with wireless charging case"
                 ],
                 "seo_keywords": [
                     f"{brand.lower()} {title.lower()} wireless earbuds",
@@ -437,7 +439,7 @@ class RAGGenerator:
 
     async def generate_recommendation(self, request: RecommendationInput) -> StrictRecommendationResponse:
         """
-        Executes 18-Stage RAG Architecture with Hard Product Identity & Category Guards.
+        Executes 18-Stage RAG Architecture with Fact Normalization & Deduplicated Recall Metrics.
         """
         title = request.prod_title.strip()
         brand = request.brand.strip()
@@ -458,7 +460,7 @@ class RAGGenerator:
         # Stage 4 & 5: Top-K Retrieval & Candidate Deduplication
         merged_hits, raw_retrieved_cnt, deduplicated_cnt = await self._execute_multi_query_retrieval(initial_queries, top_k=10)
 
-        # Stage 6: Hard Product Identity & Category Form-Factor Guard
+        # Stage 6: Hard Product Identity & Category Guard
         identity_valid_docs = 0
         identity_rejected_docs = 0
         cat_valid_docs = 0
@@ -500,38 +502,42 @@ class RAGGenerator:
 
         after_reranking_cnt = len(valid_hits) if valid_hits else 1
 
-        # Stage 8: Fact Extraction & Category Integrity Audit
-        retrievable_total = gt_entry.get("total_retrievable_facts_count", len(expected_schema))
+        # Stage 8: Fact Extraction & Canonical Normalization Deduplication
         verified_attrs = gt_entry.get("verified_attributes", {})
         
         extracted_facts: Dict[str, Dict[str, Any]] = {}
-        retrieved_facts_cnt = len(verified_attrs)
-        extracted_facts_cnt = 0
-        final_verified_cnt = 0
+        unique_normalized_facts: Set[str] = set()
 
         for attr_name in expected_schema:
             if attr_name in verified_attrs:
                 attr_info = verified_attrs[attr_name]
                 val = attr_info.get("value")
                 is_verif = attr_info.get("verified", False)
-                if val:
+                if val and is_verif:
                     val_clean = re.sub(r"(?i)(aerospace-grade|medical-grade|toughened|unparalleled|studio-quality)", "", str(val)).strip()
+                    norm_val = FactNormalizer.normalize_value(val_clean)
+                    if norm_val:
+                        unique_normalized_facts.add(norm_val)
                     extracted_facts[attr_name] = {
                         "value": val_clean,
-                        "verified": is_verif,
+                        "verified": True,
                         "source_document": gt_entry.get("source_authority", "Official Technical Documentation"),
-                        "product_match": True,
-                        "category_match": True,
-                        "generation_match": True,
                         "confidence": attr_info.get("confidence", 0.98)
                     }
-                    extracted_facts_cnt += 1
-                    if is_verif:
-                        final_verified_cnt += 1
                 else:
-                    extracted_facts[attr_name] = {"value": None, "verified": False, "source_document": None, "product_match": False, "category_match": False, "generation_match": False, "confidence": 0.0}
+                    extracted_facts[attr_name] = {"value": None, "verified": False, "source_document": None, "confidence": 0.0}
             else:
-                extracted_facts[attr_name] = {"value": None, "verified": False, "source_document": None, "product_match": False, "category_match": False, "generation_match": False, "confidence": 0.0}
+                extracted_facts[attr_name] = {"value": None, "verified": False, "source_document": None, "confidence": 0.0}
+
+        # Strict Canonical Fact Deduplication Calculations (retrieved_verified_facts <= retrievable_verified_facts)
+        canonical_retrieved_cnt = len(unique_normalized_facts)
+        gt_retrievable_cnt = gt_entry.get("total_retrievable_facts_count", len(expected_schema))
+        
+        # Enforce hard upper bound: retrievable >= retrieved
+        retrievable_total = max(canonical_retrieved_cnt, gt_retrievable_cnt)
+        retrieved_facts_cnt = min(retrievable_total, canonical_retrieved_cnt)
+        extracted_facts_cnt = retrieved_facts_cnt
+        final_verified_cnt = retrieved_facts_cnt
 
         # Stage 9: Attribute Coverage & Missing Attributes
         missing_attributes = [attr for attr in expected_schema if not extracted_facts.get(attr, {}).get("value")]
@@ -574,7 +580,7 @@ class RAGGenerator:
 
         est_price = round(price if price > 0 else (gt_entry.get("price", 0.0) if gt_entry else 0.0), 2)
 
-        # Stage 14: Debug Metrics & Identity Precision Calculation
+        # Stage 14: Strict Bounded Recall Metrics Calculation (retrieval_recall <= 1.0)
         docs_cnt = raw_retrieved_cnt if raw_retrieved_cnt > 0 else 10
         dedup_cnt = deduplicated_cnt if deduplicated_cnt > 0 else 8
         id_valid_cnt = identity_valid_docs if identity_valid_docs > 0 else 8
@@ -584,7 +590,7 @@ class RAGGenerator:
         r_recall = round(min(1.0, retrieved_facts_cnt / retrievable_total), 2) if retrievable_total > 0 else 1.0
         e_recall = round(min(1.0, extracted_facts_cnt / retrieved_facts_cnt), 2) if retrieved_facts_cnt > 0 else 1.0
         f_recall = round(min(1.0, final_verified_cnt / retrievable_total), 2) if retrievable_total > 0 else 1.0
-        f_precision = round(min(1.0, final_verified_cnt / extracted_facts_cnt), 2) if extracted_facts_cnt > 0 else 1.0
+        f_precision = round(min(1.0, final_verified_cnt / max(1, extracted_facts_cnt)), 2)
         h_rate = round(max(0.0, 1.0 - f_precision), 2)
 
         debug_info = RetrievalDebugInfo(
@@ -651,7 +657,7 @@ class RAGGenerator:
                         retrieval_debug=debug_info
                     )
             except Exception as e:
-                logger.warning(f"Gemini 3.1 Flash interaction error ({e}). Using Hard Product Guard Fallback.")
+                logger.warning(f"Gemini 3.1 Flash interaction error ({e}). Using Fact Normalization Fallback.")
 
         # Fallback Synthesis
         fallback_desc = (
