@@ -2,6 +2,7 @@ import os
 import base64
 import logging
 import urllib.parse
+import re
 from typing import Optional
 from app.config import settings
 
@@ -9,8 +10,8 @@ logger = logging.getLogger("image_generator")
 
 class ImageGenerationEngine:
     """
-    Simple Amazon & Flipkart Style Product Listing Image Engine.
-    Keeps the product clean, simple, centered, and isolated on a solid marketplace background.
+    Clean E-Commerce Product Image Engine.
+    Focuses ONLY on the product with enhanced texture, crystal clarity, and zero background distractions.
     """
 
     def __init__(self, api_key: Optional[str] = settings.GEMINI_API_KEY):
@@ -28,26 +29,30 @@ class ImageGenerationEngine:
                 logger.warning(f"Could not initialize genai client: {e}")
                 self.client = None
 
-    def _generate_simple_ecom_catalog_url(self, prompt: str) -> str:
+    def _generate_clean_product_url(self, prompt: str) -> str:
         """
-        Generates a clean, simple Amazon/Flipkart marketplace product photo.
-        Clean centered product shot on a plain solid white background with subtle shadow.
+        Generates a clean product photo displaying ONLY the product with ultra-sharp texture & clarity.
         """
-        simple_prompt = (
-            f"Simple Amazon product listing photo of {prompt[:150]}, "
-            f"plain solid white background, centered product view, soft subtle shadow, "
-            f"clean official e-commerce store item photo"
+        # Clean up input text to extract primary product phrase
+        clean_text = re.sub(r"(?i)(isolate|remove background|showcase|product listing|for amazon|for flipkart|on clean white)", "", prompt).strip()
+        if not clean_text or len(clean_text) < 3:
+            clean_text = prompt
+
+        clean_prompt = (
+            f"Official e-commerce catalog photo of {clean_text[:120]}, "
+            f"isolated on plain solid white background, macro ultra-sharp product texture and crystal clarity, "
+            f"zero background details, centered hero product display"
         )
-        encoded_prompt = urllib.parse.quote(simple_prompt)
+        encoded_prompt = urllib.parse.quote(clean_prompt)
         return f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
 
     async def generate_product_image(self, image_url: str, prompt: str) -> dict:
         """
-        Takes image_url and prompt, returning a clean Amazon/Flipkart style product listing image.
+        Takes image_url and prompt, returning an enhanced product image focusing ONLY on product texture and clarity.
         """
-        simple_prompt = (
-            f"Official marketplace product listing photo for ({image_url}): {prompt}. "
-            f"Plain clean white background, centered product, soft natural shadow."
+        focused_prompt = (
+            f"Official product photo for ({image_url}): {prompt}. "
+            f"Show ONLY the product with ultra-sharp texture, crystal clarity, and solid white background."
         )
 
         if self.client:
@@ -61,7 +66,7 @@ class ImageGenerationEngine:
 
                 interaction = self.client.interactions.create(
                     model='models/gemini-3.1-flash-lite-image',
-                    input=simple_prompt,
+                    input=focused_prompt,
                     generation_config=generation_config,
                     response_modalities=['image', 'text'],
                 )
@@ -88,14 +93,14 @@ class ImageGenerationEngine:
                     }
 
             except Exception as e:
-                logger.info(f"Gemini image API limit/error ({e}). Using Simple E-Commerce Catalog AI Generator.")
+                logger.info(f"Gemini image API limit/error ({e}). Using Clean Product AI Generator.")
 
-        # Simple Amazon / Flipkart Catalog AI Generator
-        free_ai_url = self._generate_simple_ecom_catalog_url(prompt)
+        # Clean Product AI Generator (Enhanced Texture & Clarity)
+        free_ai_url = self._generate_clean_product_url(prompt)
         return {
             "status": "success",
             "generated_image_url": free_ai_url,
-            "model_used": "flux-simple-ecom"
+            "model_used": "flux-clean-product"
         }
 
 image_generator = ImageGenerationEngine()

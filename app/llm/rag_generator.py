@@ -79,10 +79,11 @@ class RAGGenerator:
         ]
 
         img_prompt = (
-            f"Simple Amazon and Flipkart listing product photo of {title} by {brand_cap}, "
-            f"plain solid white studio background, centered hero product display, soft natural drop shadow, "
-            f"clean official online marketplace catalog photo"
+            f"Official e-commerce catalog photo of {title} by {brand_cap}, "
+            f"isolated on plain solid white background, macro ultra-sharp product texture and crystal clarity, "
+            f"zero background details, centered hero product display"
         )
+
 
 
 
