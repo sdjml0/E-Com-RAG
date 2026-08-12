@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: multimodal-ecom-rag-microservice
+    env: python
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: QDRANT_URL
+        value: ":memory:"
+      - key: COLLECTION_NAME
+        value: ecommerce_products_v1
+      - key: GEMINI_API_KEY
+        sync: false
