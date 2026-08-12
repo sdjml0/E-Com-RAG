@@ -9,8 +9,8 @@ logger = logging.getLogger("image_generator")
 
 class ImageGenerationEngine:
     """
-    E-Commerce Product-Level Image Generation & Enhancement Pipeline.
-    Takes user image_url + prompt and returns a new product-level image.
+    E-Commerce Marketplace Product-Level Image Generation Pipeline.
+    Engineered specifically for clean Amazon/Shopify/Flipkart white-background catalog standards.
     """
 
     def __init__(self, api_key: Optional[str] = settings.GEMINI_API_KEY):
@@ -28,17 +28,27 @@ class ImageGenerationEngine:
                 logger.warning(f"Could not initialize genai client: {e}")
                 self.client = None
 
-    def _generate_free_ai_image_url(self, prompt: str) -> str:
-        """Generates a 100% Free AI Product Image URL using Pollinations AI (Flux / Stable Diffusion)."""
-        clean_prompt = f"E-Commerce product photography: {prompt[:180]}"
-        encoded_prompt = urllib.parse.quote(clean_prompt)
-        return f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=512&height=512&nologo=true"
+    def _generate_ecom_catalog_image_url(self, prompt: str) -> str:
+        """
+        Generates HD 1024x1024 E-Commerce Catalog Product Images using FLUX Realism AI.
+        Optimized for pure white studio background and bright softbox commercial marketplace lighting.
+        """
+        ecom_prompt = (
+            f"High-end commercial e-commerce product catalog photo of {prompt[:160]}, "
+            f"isolated on seamless pure white studio background, bright softbox commercial studio lighting, "
+            f"centered hero composition, sharp focus, ultra-crisp 8k detail, professional online marketplace listing picture"
+        )
+        encoded_prompt = urllib.parse.quote(ecom_prompt)
+        return f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
 
     async def generate_product_image(self, image_url: str, prompt: str) -> dict:
         """
-        Takes image_url and prompt, returning a new product level image URL.
+        Takes image_url and prompt, returning a clean, high-resolution product-level e-commerce catalog image.
         """
-        full_prompt = f"Studio e-commerce product enhancement for image ({image_url}): {prompt}"
+        full_prompt = (
+            f"E-commerce product photo for listing ({image_url}): {prompt}. "
+            f"Pure white studio background, bright commercial studio lighting, sharp product focus."
+        )
 
         if self.client:
             try:
@@ -78,14 +88,14 @@ class ImageGenerationEngine:
                     }
 
             except Exception as e:
-                logger.info(f"Gemini image API limit/error ({e}). Using Free AI Image Generator (Flux).")
+                logger.info(f"Gemini image API limit/error ({e}). Using FLUX E-Commerce Catalog AI Generator.")
 
-        # 100% Free AI Product Image Generation Fallback (Flux / Stable Diffusion)
-        free_ai_url = self._generate_free_ai_image_url(prompt)
+        # High-Resolution FLUX E-Commerce Marketplace Catalog AI Generator
+        free_ai_url = self._generate_ecom_catalog_image_url(prompt)
         return {
             "status": "success",
             "generated_image_url": free_ai_url,
-            "model_used": "flux-schnell-free-ai"
+            "model_used": "flux-ecom-catalog-ai"
         }
 
 image_generator = ImageGenerationEngine()

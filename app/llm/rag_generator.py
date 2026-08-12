@@ -79,10 +79,11 @@ class RAGGenerator:
         ]
 
         img_prompt = (
-            f"Commercial studio product photography of {title} by {brand_cap}, "
-            f"rendered in clean commercial e-commerce aesthetic, soft studio lighting, "
-            f"minimalist background, high-detail texture, 8k resolution, photorealistic."
+            f"High-end commercial e-commerce product catalog photo of {title} by {brand_cap}, "
+            f"isolated on seamless pure white studio background, bright softbox commercial studio lighting, "
+            f"centered hero composition, sharp focus, 8k resolution, professional online marketplace product listing picture"
         )
+
 
         return StrictRecommendationResponse(
             product_description=desc,
@@ -155,7 +156,8 @@ class RAGGenerator:
                     f'  "mined_high_rank_seo_keywords": [\n'
                     f'    "keyword 1", "keyword 2", "keyword 3", "keyword 4"\n'
                     f'  ],\n'
-                    f'  "best_prompt_for_image_enhancement": "Hyper-realistic commercial studio product photography prompt..."\n'
+                    f'  "best_prompt_for_image_enhancement": "High-end commercial e-commerce product catalog photo, isolated on seamless pure white studio background, bright softbox commercial studio lighting, centered hero composition, 8k resolution, professional online marketplace listing photo"\n'
+
                     f"}}\n"
                 )
 
