@@ -12,5 +12,9 @@ services:
         value: ":memory:"
       - key: COLLECTION_NAME
         value: ecommerce_products_v1
+      - key: AUTO_SYNC_DATABASE
+        value: "true"
       - key: GEMINI_API_KEY
+        sync: false
+      - key: DATABASE_URL
         sync: false
