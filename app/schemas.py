@@ -32,13 +32,16 @@ class RecommendationInput(BaseModel):
 class RetrievalDebugInfo(BaseModel):
     documents_retrieved: int = 0
     relevant_documents: int = 0
-    facts_found: int = 0
-    facts_extracted: int = 0
-    facts_verified: int = 0
-    facts_omitted: int = 0
+    retrievable_verified_facts: int = 0
+    retrieved_verified_facts: int = 0
+    extracted_verified_facts: int = 0
+    final_verified_facts: int = 0
+    retrieval_recall: float = 1.0
+    extraction_recall: float = 1.0
+    final_recall: float = 1.0
     fact_precision: float = 1.0
-    fact_recall: float = 1.0
     hallucination_rate: float = 0.0
+
 
 # 1. Recommendation API Output Schema (Strictly follows pattern)
 class StrictRecommendationResponse(BaseModel):
