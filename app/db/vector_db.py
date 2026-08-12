@@ -119,6 +119,45 @@ class VectorDBManager:
         )
         logger.debug(f"Upserted product {product.product_id} into Qdrant.")
 
+    async def upsert_batch(
+        self,
+        products: List[ProductIngestRequest],
+        text_vectors: List[List[float]],
+        image_vectors: List[List[float]]
+    ):
+        """Batch upsert products into Qdrant in a single vector RPC call."""
+        await self.ensure_collection()
+        points = []
+        for prod, t_vec, i_vec in zip(products, text_vectors, image_vectors):
+            brand_clean = prod.brand.strip().lower()
+            category_paths = [c.strip().lower() for c in prod.category.split(">")]
+            point_id = self._string_to_uuid(prod.product_id)
+            payload = {
+                "product_id": prod.product_id,
+                "prod_title": prod.prod_title,
+                "prod_image_url": str(prod.prod_image_url),
+                "price": float(prod.price),
+                "category": prod.category,
+                "category_path": category_paths,
+                "brand": brand_clean
+            }
+            points.append(rest_models.PointStruct(
+                id=point_id,
+                vector={
+                    "text_vector": t_vec,
+                    "image_vector": i_vec
+                },
+                payload=payload
+            ))
+
+        if points:
+            await self.client.upsert(
+                collection_name=self.collection_name,
+                points=points
+            )
+            logger.info(f"Batch upserted {len(points):,} products into Qdrant.")
+
+
     async def count_points(self) -> int:
         try:
             info = await self.client.get_collection(collection_name=self.collection_name)
