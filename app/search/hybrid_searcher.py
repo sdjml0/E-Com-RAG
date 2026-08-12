@@ -166,4 +166,9 @@ class HybridSearcher:
             results=results
         )
 
+    # Alias for search execution
+    async def search(self, request: SearchQueryRequest, trace_id: str | None = None) -> SearchQueryResponse:
+        return await self.execute_search(request, trace_id)
+
 hybrid_searcher = HybridSearcher()
+
