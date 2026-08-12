@@ -29,21 +29,37 @@ class RecommendationInput(BaseModel):
     brand: str = Field(..., description="Brand name", json_schema_extra={"example": "Sony"})
     query: Optional[str] = Field(None, description="Optional user search intent query")
 
+class ProductIdentityValidationInfo(BaseModel):
+    brand_match: bool = True
+    model_match: bool = True
+    category_match: bool = True
+    generation_match: bool = True
+    accepted: bool = True
+    reason: str = "Verified exact product identity match"
+
 class RetrievalDebugInfo(BaseModel):
     queries_generated: int = 0
     documents_retrieved: int = 0
     documents_after_deduplication: int = 0
     documents_after_reranking: int = 0
+    identity_valid_documents: int = 0
+    identity_rejected_documents: int = 0
+    category_valid_documents: int = 0
+    category_rejected_documents: int = 0
+    generation_valid_documents: int = 0
+    generation_rejected_documents: int = 0
+    identity_precision: float = 1.0
     retrievable_verified_facts: int = 0
     retrieved_verified_facts: int = 0
     extracted_verified_facts: int = 0
     final_verified_facts: int = 0
-    retrieval_recall: float = 0.90
+    retrieval_recall: float = 1.0
     extraction_recall: float = 1.0
-    final_recall: float = 0.90
+    final_recall: float = 1.0
     fact_precision: float = 1.0
     hallucination_rate: float = 0.0
     missing_facts: List[str] = Field(default_factory=list)
+    product_identity_validation: Optional[ProductIdentityValidationInfo] = None
 
 # 1. Recommendation API Output Schema (Strictly follows pattern)
 class StrictRecommendationResponse(BaseModel):
