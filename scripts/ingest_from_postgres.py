@@ -29,6 +29,9 @@ from typing import List, Dict, Any, Tuple
 # Ensure project directory is in python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from app.config import settings
 from app.schemas import ProductIngestRequest
 from app.embeddings.text_embedder import text_embedder
@@ -43,6 +46,7 @@ def get_database_url() -> str:
     db_url = os.getenv("DATABASE_URL")
     if db_url:
         return db_url
+
 
     user = os.getenv("POSTGRES_USER", "postgres")
     password = os.getenv("POSTGRES_PASSWORD", "")
