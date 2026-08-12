@@ -1,12 +1,28 @@
 #!/usr/bin/env python3
 """
-PostgreSQL Table Ingestion Tool for Multimodal E-Commerce RAG Engine.
+Secure PostgreSQL Ingestion Tool for Multimodal E-Commerce RAG Engine.
 
-Connects directly to your PostgreSQL database, streams rows from your products table,
-generates dual multi-vectors, and syncs them into Qdrant.
+Features:
+  1. SECURE: Reads database connection details from .env (DATABASE_URL or POSTGRES_*) without exposing passwords.
+  2. MULTI-TABLE: Supports custom SQL JOIN queries across multiple database tables (e.g. products JOIN categories JOIN brands).
 
 Usage:
-    python scripts/ingest_from_postgres.py --db-url "postgresql://user:password@localhost:5432/dbname" --table products
+    # Uses DATABASE_URL from .env automatically
+    python scripts/ingest_from_postgres.py
+
+    # Or specify custom SQL JOIN query for normalized multi-table database schemas
+    python scripts/ingest_from_postgres.py --query "
+        SELECT 
+            p.id as product_id, 
+            p.title as prod_title, 
+            p.image_url as prod_image_url, 
+            p.price, 
+            c.name as category, 
+            b.name as brand 
+        FROM products p 
+        LEFT JOIN categories c ON p.category_id = c.id 
+        LEFT JOIN brands b ON p.brand_id = b.id
+    "
 """
 
 import os
@@ -20,6 +36,7 @@ from typing import List, Dict, Any
 # Ensure project directory is in python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from app.config import settings
 from app.schemas import ProductIngestRequest
 from app.embeddings.text_embedder import text_embedder
 from app.embeddings.vision_embedder import vision_embedder
@@ -28,10 +45,28 @@ from app.db.vector_db import vector_db_manager
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("postgres_ingestor")
 
-def fetch_postgres_products(db_url: str, table_name: str, limit: int = 10000) -> List[Dict[str, Any]]:
-    """Fetches product records directly from a PostgreSQL table using psycopg2 / asyncpg / sqlalchemy."""
+def get_database_url() -> str:
+    """Reads database URL securely from environment variables without command line exposure."""
+    db_url = os.getenv("DATABASE_URL")
+    if db_url:
+        return db_url
+
+    # Fallback to individual POSTGRES_* environment variables
+    user = os.getenv("POSTGRES_USER", "postgres")
+    password = os.getenv("POSTGRES_PASSWORD", "")
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    dbname = os.getenv("POSTGRES_DB", "postgres")
+
+    if password:
+        return f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
+    return f"postgresql://{user}@{host}:{port}/{dbname}"
+
+def fetch_postgres_data(query_sql: str, limit: int = 100000) -> List[Dict[str, Any]]:
+    """Executes secure SQL query across single or multiple joined tables in PostgreSQL."""
+    db_url = get_database_url()
     products = []
-    logger.info(f"Connecting to PostgreSQL database to read table '{table_name}'...")
+    logger.info("Executing secure PostgreSQL data fetch...")
 
     try:
         import psycopg2
@@ -39,36 +74,38 @@ def fetch_postgres_products(db_url: str, table_name: str, limit: int = 10000) ->
 
         conn = psycopg2.connect(db_url, cursor_factory=RealDictCursor)
         with conn.cursor() as cur:
-            query = f"SELECT * FROM {table_name} LIMIT %s"
-            cur.execute(query, (limit,))
+            full_query = f"{query_sql} LIMIT %s" if "LIMIT" not in query_sql.upper() else query_sql
+            if "LIMIT" not in query_sql.upper():
+                cur.execute(full_query, (limit,))
+            else:
+                cur.execute(full_query)
             rows = cur.fetchall()
             for r in rows:
                 products.append({
                     "product_id": str(r.get("product_id") or r.get("id") or r.get("sku") or "SKU-PG"),
                     "prod_title": str(r.get("prod_title") or r.get("title") or r.get("name") or "Product"),
                     "prod_image_url": str(r.get("prod_image_url") or r.get("image_url") or r.get("image") or "https://images.unsplash.com/photo-1505740420928-5e560c06d30e"),
-                    "price": float(r.get("price") or 29.99),
-                    "category": str(r.get("category") or "General"),
-                    "brand": str(r.get("brand") or "Generic")
+                    "price": float(r.get("price") or 0.0),
+                    "category": str(r.get("category") or r.get("category_name") or "General"),
+                    "brand": str(r.get("brand") or r.get("brand_name") or "Generic")
                 })
         conn.close()
     except ImportError:
-        logger.info("psycopg2 not installed. Trying sqlalchemy...")
         from sqlalchemy import create_engine, text
         engine = create_engine(db_url)
         with engine.connect() as conn:
-            result = conn.execute(text(f"SELECT * FROM {table_name} LIMIT {limit}"))
+            result = conn.execute(text(query_sql))
             for r in result.mappings():
                 products.append({
                     "product_id": str(r.get("product_id") or r.get("id") or r.get("sku") or "SKU-PG"),
                     "prod_title": str(r.get("prod_title") or r.get("title") or r.get("name") or "Product"),
                     "prod_image_url": str(r.get("prod_image_url") or r.get("image_url") or r.get("image") or "https://images.unsplash.com/photo-1505740420928-5e560c06d30e"),
-                    "price": float(r.get("price") or 29.99),
-                    "category": str(r.get("category") or "General"),
-                    "brand": str(r.get("brand") or "Generic")
+                    "price": float(r.get("price") or 0.0),
+                    "category": str(r.get("category") or r.get("category_name") or "General"),
+                    "brand": str(r.get("brand") or r.get("brand_name") or "Generic")
                 })
 
-    logger.info(f"Successfully fetched {len(products):,} products from PostgreSQL table '{table_name}'.")
+    logger.info(f"Successfully retrieved {len(products):,} records from PostgreSQL.")
     return products
 
 async def process_batch(batch: List[Dict[str, Any]]):
@@ -100,9 +137,9 @@ async def process_batch(batch: List[Dict[str, Any]]):
     if ingest_requests:
         await vector_db_manager.upsert_batch(ingest_requests, text_vectors, image_vectors)
 
-async def main(db_url: str, table: str, batch_size: int = 500):
+async def main(query_sql: str, batch_size: int = 500):
     await vector_db_manager.init_collection()
-    products = fetch_postgres_products(db_url, table)
+    products = fetch_postgres_data(query_sql)
 
     start_time = time.time()
     total_processed = 0
@@ -111,15 +148,15 @@ async def main(db_url: str, table: str, batch_size: int = 500):
         chunk = products[i:i + batch_size]
         await process_batch(chunk)
         total_processed += len(chunk)
-        logger.info(f"Progress: {total_processed:,} / {len(products):,} products indexed from PostgreSQL")
+        logger.info(f"Progress: {total_processed:,} / {len(products):,} products indexed into Qdrant")
 
-    logger.info(f"✅ PostgreSQL Ingestion Complete! Synced {total_processed:,} products in {time.time() - start_time:.2f} seconds.")
+    logger.info(f"✅ Secure Multi-Table Ingestion Complete! Synced {total_processed:,} products in {time.time() - start_time:.2f} seconds.")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Ingest PostgreSQL Products Table into Multimodal RAG Engine")
-    parser.add_argument("--db-url", type=str, required=True, help="PostgreSQL connection string (e.g. postgresql://user:pass@localhost:5432/dbname)")
-    parser.add_argument("--table", type=str, default="products", help="Name of products table (default: products)")
+    default_query = "SELECT * FROM products"
+    parser = argparse.ArgumentParser(description="Secure Multi-Table PostgreSQL Ingestion Tool")
+    parser.add_argument("--query", type=str, default=default_query, help="SQL query or JOIN statement for multi-table schemas")
     parser.add_argument("--batch-size", type=int, default=500, help="Batch size for vector indexing (default: 500)")
     args = parser.parse_args()
 
-    asyncio.run(main(args.db_url, args.table, args.batch_size))
+    asyncio.run(main(args.query, args.batch_size))
