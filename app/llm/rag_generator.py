@@ -79,10 +79,11 @@ class RAGGenerator:
         ]
 
         img_prompt = (
-            f"High-end commercial e-commerce product catalog photo of {title} by {brand_cap}, "
-            f"isolated on seamless pure white studio background, bright softbox commercial studio lighting, "
-            f"centered hero composition, sharp focus, 8k resolution, professional online marketplace product listing picture"
+            f"Simple Amazon and Flipkart listing product photo of {title} by {brand_cap}, "
+            f"plain solid white studio background, centered hero product display, soft natural drop shadow, "
+            f"clean official online marketplace catalog photo"
         )
+
 
 
         return StrictRecommendationResponse(

@@ -9,8 +9,8 @@ logger = logging.getLogger("image_generator")
 
 class ImageGenerationEngine:
     """
-    E-Commerce Marketplace Product-Level Image Generation Pipeline.
-    Engineered specifically for clean Amazon/Shopify/Flipkart white-background catalog standards.
+    Simple Amazon & Flipkart Style Product Listing Image Engine.
+    Keeps the product clean, simple, centered, and isolated on a solid marketplace background.
     """
 
     def __init__(self, api_key: Optional[str] = settings.GEMINI_API_KEY):
@@ -28,26 +28,26 @@ class ImageGenerationEngine:
                 logger.warning(f"Could not initialize genai client: {e}")
                 self.client = None
 
-    def _generate_ecom_catalog_image_url(self, prompt: str) -> str:
+    def _generate_simple_ecom_catalog_url(self, prompt: str) -> str:
         """
-        Generates HD 1024x1024 E-Commerce Catalog Product Images using FLUX Realism AI.
-        Optimized for pure white studio background and bright softbox commercial marketplace lighting.
+        Generates a clean, simple Amazon/Flipkart marketplace product photo.
+        Clean centered product shot on a plain solid white background with subtle shadow.
         """
-        ecom_prompt = (
-            f"High-end commercial e-commerce product catalog photo of {prompt[:160]}, "
-            f"isolated on seamless pure white studio background, bright softbox commercial studio lighting, "
-            f"centered hero composition, sharp focus, ultra-crisp 8k detail, professional online marketplace listing picture"
+        simple_prompt = (
+            f"Simple Amazon product listing photo of {prompt[:150]}, "
+            f"plain solid white background, centered product view, soft subtle shadow, "
+            f"clean official e-commerce store item photo"
         )
-        encoded_prompt = urllib.parse.quote(ecom_prompt)
+        encoded_prompt = urllib.parse.quote(simple_prompt)
         return f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
 
     async def generate_product_image(self, image_url: str, prompt: str) -> dict:
         """
-        Takes image_url and prompt, returning a clean, high-resolution product-level e-commerce catalog image.
+        Takes image_url and prompt, returning a clean Amazon/Flipkart style product listing image.
         """
-        full_prompt = (
-            f"E-commerce product photo for listing ({image_url}): {prompt}. "
-            f"Pure white studio background, bright commercial studio lighting, sharp product focus."
+        simple_prompt = (
+            f"Official marketplace product listing photo for ({image_url}): {prompt}. "
+            f"Plain clean white background, centered product, soft natural shadow."
         )
 
         if self.client:
@@ -61,7 +61,7 @@ class ImageGenerationEngine:
 
                 interaction = self.client.interactions.create(
                     model='models/gemini-3.1-flash-lite-image',
-                    input=full_prompt,
+                    input=simple_prompt,
                     generation_config=generation_config,
                     response_modalities=['image', 'text'],
                 )
@@ -88,14 +88,14 @@ class ImageGenerationEngine:
                     }
 
             except Exception as e:
-                logger.info(f"Gemini image API limit/error ({e}). Using FLUX E-Commerce Catalog AI Generator.")
+                logger.info(f"Gemini image API limit/error ({e}). Using Simple E-Commerce Catalog AI Generator.")
 
-        # High-Resolution FLUX E-Commerce Marketplace Catalog AI Generator
-        free_ai_url = self._generate_ecom_catalog_image_url(prompt)
+        # Simple Amazon / Flipkart Catalog AI Generator
+        free_ai_url = self._generate_simple_ecom_catalog_url(prompt)
         return {
             "status": "success",
             "generated_image_url": free_ai_url,
-            "model_used": "flux-ecom-catalog-ai"
+            "model_used": "flux-simple-ecom"
         }
 
 image_generator = ImageGenerationEngine()
