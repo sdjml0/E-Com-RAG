@@ -37,6 +37,16 @@ class ProductIdentityValidationInfo(BaseModel):
     accepted: bool = True
     reason: str = "Verified exact product identity match"
 
+class FactEvidenceValidation(BaseModel):
+    attribute: str
+    normalized_value: str
+    source_document_id: str
+    evidence_span: str
+    product_identity_validation: bool = True
+    category_validation: bool = True
+    generation_validation: bool = True
+    verified_status: bool = True
+
 class RetrievalDebugInfo(BaseModel):
     queries_generated: int = 0
     documents_retrieved: int = 0
@@ -58,8 +68,11 @@ class RetrievalDebugInfo(BaseModel):
     final_recall: float = 1.0
     fact_precision: float = 1.0
     hallucination_rate: float = 0.0
+    evidence_coverage: float = 1.0
     missing_facts: List[str] = Field(default_factory=list)
     product_identity_validation: Optional[ProductIdentityValidationInfo] = None
+    verified_fact_evidence: Optional[List[FactEvidenceValidation]] = None
+
 
 # 1. Recommendation API Output Schema (Strictly follows pattern)
 class StrictRecommendationResponse(BaseModel):
