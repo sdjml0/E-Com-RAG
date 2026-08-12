@@ -29,6 +29,17 @@ class RecommendationInput(BaseModel):
     brand: str = Field(..., description="Brand name", json_schema_extra={"example": "Sony"})
     query: Optional[str] = Field(None, description="Optional user search intent query")
 
+class RetrievalDebugInfo(BaseModel):
+    documents_retrieved: int = 0
+    relevant_documents: int = 0
+    facts_found: int = 0
+    facts_extracted: int = 0
+    facts_verified: int = 0
+    facts_omitted: int = 0
+    fact_precision: float = 1.0
+    fact_recall: float = 1.0
+    hallucination_rate: float = 0.0
+
 # 1. Recommendation API Output Schema (Strictly follows pattern)
 class StrictRecommendationResponse(BaseModel):
     product_description: str = Field(..., description="Generated e-commerce product description")
@@ -37,6 +48,8 @@ class StrictRecommendationResponse(BaseModel):
     detected_product_specifications_and_attributes: Dict[str, Any] = Field(..., description="Detected product specifications & attributes")
     mined_high_rank_seo_keywords: List[str] = Field(..., description="Mined high-rank SEO keywords")
     best_prompt_for_image_enhancement: str = Field(..., description="Best prompt for image enhancement")
+    retrieval_debug: Optional[RetrievalDebugInfo] = Field(None, description="Detailed 20-point RAG pipeline debug metrics")
+
 
 # 2. Image Generation API Input Schema
 class ImageGenerationInput(BaseModel):
