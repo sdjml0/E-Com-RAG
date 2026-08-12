@@ -347,10 +347,13 @@ class RAGGenerator:
         price = request.price if request.price >= 0 else 0.0
         prod_image_url = str(request.prod_image_url)
 
-        # Stage 1: Category Schema Resolution & Domain Attribute Validation
-        resolved_schema = category_schema_resolver.resolve_schema(category, title)
+        # Stage 1, 2, 3 & 4: Zero-Hardcoding Universal Product Understanding & Dynamic Attribute Discovery
+        resolved_schema = category_schema_resolver.resolve_schema_dynamically(
+            title=title, brand=brand, category=category, price=price, prod_image_url=prod_image_url, client=self.client
+        )
         all_expected_attrs = resolved_schema.required_attributes + resolved_schema.recommended_attributes + resolved_schema.optional_attributes
         non_app_set = set(resolved_schema.non_applicable_attributes)
+
 
         # Final Schema Guard 1: Assert all required attributes belong to primary_domain
         assert all(a not in non_app_set for a in resolved_schema.required_attributes), "Schema Error: Required attribute leaked into non-applicable set"
