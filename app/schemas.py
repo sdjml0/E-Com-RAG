@@ -1,7 +1,6 @@
 from typing import List, Optional, Dict, Any, Literal
 from pydantic import BaseModel, Field, HttpUrl
 
-# RAG Strategy Types
 RAGStrategy = Literal["hybrid", "text_only", "vision_only", "price_elastic"]
 
 # Product Ingestion Schemas
@@ -9,10 +8,9 @@ class ProductIngestRequest(BaseModel):
     product_id: str = Field(..., description="Unique product SKU or ID", json_schema_extra={"example": "SKU-HEADPHONE-001"})
     prod_title: str = Field(..., min_length=2, max_length=500, description="Product display title", json_schema_extra={"example": "Sony WH-1000XM5 Wireless Headphones"})
     prod_image_url: HttpUrl = Field(..., description="Absolute URL to product image")
-    price: float = Field(..., gt=0.0, description="Product price in USD")
+    price: float = Field(..., ge=0.0, description="Product price in USD")
     category: str = Field(..., min_length=1, description="Hierarchical category (e.g., Electronics > Audio > Headphones)")
     brand: str = Field(..., min_length=1, description="Brand name", json_schema_extra={"example": "Sony"})
-
 
 class BatchIngestRequest(BaseModel):
     products: List[ProductIngestRequest]
@@ -22,26 +20,36 @@ class IngestResponse(BaseModel):
     ingested_count: int
     message: str
 
-# Weights schema for custom rank fusion
-class SearchWeights(BaseModel):
-    text: float = Field(0.45, ge=0.0, le=1.0)
-    image: float = Field(0.35, ge=0.0, le=1.0)
-    bm25: float = Field(0.20, ge=0.0, le=1.0)
+# 1. Recommendation API Input Schema (Takes 5 core params)
+class RecommendationInput(BaseModel):
+    prod_title: str = Field(..., description="Product Title", json_schema_extra={"example": "Sony WH-1000XM5"})
+    prod_image_url: HttpUrl = Field(..., description="Absolute URL to product image", json_schema_extra={"example": "https://images.unsplash.com/photo-1505740420928-5e560c06d30e"})
+    price: float = Field(..., ge=0.0, description="Product price or estimated price", json_schema_extra={"example": 398.00})
+    category: str = Field(..., description="Category path", json_schema_extra={"example": "Electronics > Audio > Headphones"})
+    brand: str = Field(..., description="Brand name", json_schema_extra={"example": "Sony"})
+    query: Optional[str] = Field(None, description="Optional user search intent query")
 
-# Multi-Vector Search Query Request
-class SearchQueryRequest(BaseModel):
-    query_text: Optional[str] = Field(None, description="Natural language search term")
-    query_image_url: Optional[HttpUrl] = Field(None, description="Image URL for visual similarity search")
-    brand_filter: Optional[List[str]] = Field(None, description="List of brands for hard pre-filtering")
-    category_filter: Optional[str] = Field(None, description="Category name or path for pre-filtering")
-    min_price: Optional[float] = Field(None, ge=0.0, description="Minimum price boundary")
-    max_price: Optional[float] = Field(None, ge=0.0, description="Maximum price boundary")
-    target_price: Optional[float] = Field(None, ge=0.0, description="Ideal budget for soft elasticity dampening")
-    rag_strategy: RAGStrategy = Field("hybrid", description="Retrieval strategy mode")
-    top_k: int = Field(default=10, ge=1, le=100, description="Number of candidate results to return")
-    weights: Optional[SearchWeights] = None
+# 1. Recommendation API Output Schema (Strictly follows pattern)
+class StrictRecommendationResponse(BaseModel):
+    product_description: str = Field(..., description="Generated e-commerce product description")
+    estimated_price: float = Field(..., description="Estimated market price of product")
+    key_features: List[str] = Field(..., description="Generated key features in bullet points")
+    detected_product_specifications_and_attributes: Dict[str, Any] = Field(..., description="Detected product specifications & attributes")
+    mined_high_rank_seo_keywords: List[str] = Field(..., description="Mined high-rank SEO keywords")
+    best_prompt_for_image_enhancement: str = Field(..., description="Best prompt for image enhancement")
 
-# Individual Product Search Score & Breakdown
+# 2. Image Generation API Input Schema
+class ImageGenerationInput(BaseModel):
+    image_url: HttpUrl = Field(..., description="User provided base product image URL", json_schema_extra={"example": "https://images.unsplash.com/photo-1505740420928-5e560c06d30e"})
+    prompt: str = Field(..., description="Prompt for image enhancement/editing", json_schema_extra={"example": "Studio product photography on polished dark wood with ambient studio lighting"})
+
+# 2. Image Generation API Output Schema
+class ImageGenerationOutput(BaseModel):
+    status: str = "success"
+    generated_image_url: str = Field(..., description="New product level image for e-commerce platform")
+    model_used: str = "flux-schnell-free-ai"
+
+# Multi-Vector Search & Ranking Models (for internal search engines)
 class ScoreBreakdown(BaseModel):
     text_rank: Optional[int] = None
     visual_rank: Optional[int] = None
@@ -58,23 +66,39 @@ class ProductResponse(BaseModel):
     final_score: float
     score_breakdown: ScoreBreakdown
 
+class SearchWeights(BaseModel):
+    text: float = 0.45
+    image: float = 0.35
+    bm25: float = 0.20
+
+class SearchQueryRequest(BaseModel):
+    query_text: Optional[str] = None
+    query_image_url: Optional[HttpUrl] = None
+    brand_filter: Optional[List[str]] = None
+    category_filter: Optional[str] = None
+    min_price: Optional[float] = None
+    max_price: Optional[float] = None
+    target_price: Optional[float] = None
+    rag_strategy: RAGStrategy = "hybrid"
+    top_k: int = 10
+    weights: Optional[SearchWeights] = None
+
 class SearchQueryResponse(BaseModel):
     total_hits: int
     execution_time_ms: float
     rag_strategy: RAGStrategy
     results: List[ProductResponse]
 
-# RAG Multimodal LLM Generation Request & Response
 class RAGQueryRequest(BaseModel):
-    user_query: str = Field(..., min_length=2, description="User search or query prompt")
+    user_query: str
     query_image_url: Optional[HttpUrl] = None
     brand_filter: Optional[List[str]] = None
     category_filter: Optional[str] = None
-    min_price: Optional[float] = Field(None, ge=0.0)
-    max_price: Optional[float] = Field(None, ge=0.0)
-    target_price: Optional[float] = Field(None, ge=0.0)
+    min_price: Optional[float] = None
+    max_price: Optional[float] = None
+    target_price: Optional[float] = None
     rag_strategy: RAGStrategy = "hybrid"
-    top_k: int = Field(default=5, ge=1, le=20)
+    top_k: int = 5
 
 class RAGResponse(BaseModel):
     query: str
@@ -82,63 +106,19 @@ class RAGResponse(BaseModel):
     retrieved_products: List[ProductResponse]
     execution_time_ms: float
 
-# Telemetry & Event Stream Schemas
 class PipelineTelemetryEvent(BaseModel):
     timestamp: str
     event_type: Literal["health_update", "pipeline_stage", "moving_data", "error_event"]
     trace_id: Optional[str] = None
     details: Dict[str, Any]
 
-# Simplified Single-Response RAG Request & Response Schemas
-class SimpleRAGRequest(BaseModel):
-    query: str = Field(..., min_length=2, description="Natural language shopping intent or image edit request", json_schema_extra={"example": "Sleek black wireless noise-canceling headphones for travel under $400"})
-    prod_title: Optional[str] = Field(None, description="Product title reference", json_schema_extra={"example": "Sony WH-1000XM5"})
-    prod_image_url: Optional[HttpUrl] = Field(None, description="Current product image URL")
-    price: Optional[float] = Field(None, ge=0.0, description="Product target price")
-    category: Optional[str] = Field(None, description="Category path", json_schema_extra={"example": "Electronics > Audio > Headphones"})
-    brand: Optional[str] = Field(None, description="Brand name", json_schema_extra={"example": "Sony"})
+# Legacy compatibility models
 
-class SimpleProductDetail(BaseModel):
-    product_id: str
-    title: str
-    brand: str
-    category: str
-    price: float
-    image_url: str
-    match_score: float
-    reasoning: str
+class SimpleRAGRequest(RecommendationInput):
+    pass
 
-class ImageGenPrompt(BaseModel):
-    prompt: str = Field(..., description="Prompt generated for Next-Gen Image AI Model (Imagen 3, Flux, Midjourney)")
-    action: str = Field("generate_or_edit", description="Action hint: generate new, edit background, or enhance visual style")
-    base_image_url: Optional[str] = None
-    style_modifiers: List[str] = []
-    aspect_ratio: str = "1:1"
-
-class SimpleRAGResponse(BaseModel):
-    query: str
-    product_details: SimpleProductDetail
-    image_generation_prompt: ImageGenPrompt
-    generated_image_url: Optional[str] = Field(None, description="Direct URL / Data-URI of image produced by Imagen 3 pipeline")
-
-# Dedicated Standalone Image Generation Schemas
-class ImageGenerateRequest(BaseModel):
-    prompt: str = Field(..., description="Image generation or editing prompt", json_schema_extra={"example": "Studio photography of matte black headphones on polished dark wood with ambient neon accent lighting"})
-    base_image_url: Optional[HttpUrl] = Field(None, description="Existing product image URL to edit, enhance, or use as reference")
-    product_title: Optional[str] = Field(None, description="Product title reference", json_schema_extra={"example": "Sony WH-1000XM5"})
-    brand: Optional[str] = Field(None, description="Brand visual aesthetic reference", json_schema_extra={"example": "Sony"})
-    style_modifiers: Optional[List[str]] = Field(default_factory=lambda: ["soft studio lighting", "clean minimalist backdrop", "8k ultra-detailed"])
-    aspect_ratio: str = Field("1:1", description="Target aspect ratio: 1:1, 16:9, 4:3, 9:16")
-
-class ImageGenerateResponse(BaseModel):
-    status: str
-    prompt_used: str
-    generated_image_url: str
-    model_used: str
-
-# System Health Probe Response
-
-
+class SimpleRAGResponse(StrictRecommendationResponse):
+    pass
 
 # System Health Probe Response
 class HealthCheckResponse(BaseModel):
@@ -147,5 +127,3 @@ class HealthCheckResponse(BaseModel):
     total_vectors_indexed: int
     p95_latency_ms: float
     active_subscribers: int
-
-

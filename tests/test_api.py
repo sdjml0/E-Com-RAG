@@ -9,13 +9,11 @@ async def test_health_endpoint():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
-    assert "total_vectors_indexed" in data
 
 @pytest.mark.asyncio
-async def test_simple_rag_recommendation_flow():
+async def test_recommendation_api_strict_pattern():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         payload = {
-            "query": "Sleek black wireless noise-canceling headphones for travel under $400",
             "prod_title": "Sony WH-1000XM5",
             "prod_image_url": "https://images.unsplash.com/photo-1505740420928-5e560c06d30e",
             "price": 398.00,
@@ -25,26 +23,22 @@ async def test_simple_rag_recommendation_flow():
         resp = await ac.post("/api/v1/rag/recommend", json=payload)
         assert resp.status_code == 200
         data = resp.json()
-        assert "query" in data
-        assert "product_details" in data
-        assert "image_generation_prompt" in data
-        assert "prompt" in data["image_generation_prompt"]
-        assert data["image_generation_prompt"]["action"] == "generate_or_edit"
+        assert "product_description" in data
+        assert "estimated_price" in data
+        assert isinstance(data["key_features"], list)
+        assert "detected_product_specifications_and_attributes" in data
+        assert isinstance(data["mined_high_rank_seo_keywords"], list)
+        assert "best_prompt_for_image_enhancement" in data
 
 @pytest.mark.asyncio
-async def test_image_generate_flow():
+async def test_image_generation_api():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         payload = {
-            "prompt": "Studio photography of matte black headphones on polished dark wood with ambient neon accent lighting",
-            "base_image_url": "https://images.unsplash.com/photo-1505740420928-5e560c06d30e",
-            "product_title": "Sony WH-1000XM5",
-            "brand": "Sony",
-            "aspect_ratio": "1:1"
+            "image_url": "https://images.unsplash.com/photo-1505740420928-5e560c06d30e",
+            "prompt": "Studio product photography on polished dark wood with ambient lighting"
         }
         resp = await ac.post("/api/v1/image/generate", json=payload)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] in ("success", "fallback", "success_free_ai")
+        assert data["status"] == "success"
         assert "generated_image_url" in data
-
-

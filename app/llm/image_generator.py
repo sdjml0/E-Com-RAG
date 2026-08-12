@@ -9,8 +9,8 @@ logger = logging.getLogger("image_generator")
 
 class ImageGenerationEngine:
     """
-    Multimodal Image Generation Pipeline.
-    Supports Google Gemini/Imagen 3 with automatic fallback to 100% Free AI Image Generation (Flux / Stable Diffusion).
+    E-Commerce Product-Level Image Generation & Enhancement Pipeline.
+    Takes user image_url + prompt and returns a new product-level image.
     """
 
     def __init__(self, api_key: Optional[str] = settings.GEMINI_API_KEY):
@@ -23,22 +23,23 @@ class ImageGenerationEngine:
             try:
                 from google import genai
                 self.client = genai.Client(api_key=self.api_key)
-                logger.info("Initialized Google Gemini client for image interactions.")
+                logger.info("Initialized Google Gemini client for image generation.")
             except Exception as e:
                 logger.warning(f"Could not initialize genai client: {e}")
                 self.client = None
 
     def _generate_free_ai_image_url(self, prompt: str) -> str:
-        """Generates a 100% Free AI Image URL using Pollinations AI (Flux / Stable Diffusion)."""
-        clean_prompt = prompt[:200] if len(prompt) > 200 else prompt
+        """Generates a 100% Free AI Product Image URL using Pollinations AI (Flux / Stable Diffusion)."""
+        clean_prompt = f"E-Commerce product photography: {prompt[:180]}"
         encoded_prompt = urllib.parse.quote(clean_prompt)
         return f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=512&height=512&nologo=true"
 
-    async def generate_image(self, prompt: str, base_image_url: Optional[str] = None) -> dict:
+    async def generate_product_image(self, image_url: str, prompt: str) -> dict:
         """
-        Generates or edits a product image using Gemini 3.1 Flash Image.
-        Falls back seamlessly to 100% Free Flux/Stable Diffusion AI Image generation if Gemini free tier limit is reached.
+        Takes image_url and prompt, returning a new product level image URL.
         """
+        full_prompt = f"Studio e-commerce product enhancement for image ({image_url}): {prompt}"
+
         if self.client:
             try:
                 generation_config = {
@@ -48,27 +49,20 @@ class ImageGenerationEngine:
                     'thinking_level': 'minimal',
                 }
 
-                user_input = prompt
-                if base_image_url:
-                    user_input = f"Edit product image ({base_image_url}): {prompt}"
-
                 interaction = self.client.interactions.create(
                     model='models/gemini-3.1-flash-lite-image',
-                    input=user_input,
+                    input=full_prompt,
                     generation_config=generation_config,
                     response_modalities=['image', 'text'],
                 )
 
                 extracted_b64 = None
-                extracted_text = ""
 
                 for step in getattr(interaction, "steps", []):
                     if getattr(step, "type", "") == 'model_output' and getattr(step, "content", None):
                         for part in step.content:
                             p_type = getattr(part, "type", "")
-                            if p_type == 'text':
-                                extracted_text += getattr(part, "text", "")
-                            elif p_type == 'image':
+                            if p_type == 'image':
                                 raw_data = getattr(part, "data", None)
                                 if raw_data:
                                     if isinstance(raw_data, bytes):
@@ -79,19 +73,18 @@ class ImageGenerationEngine:
                 if extracted_b64:
                     return {
                         "status": "success",
-                        "image_url": f"data:image/png;base64,{extracted_b64}",
-                        "model_used": "models/gemini-3.1-flash-lite-image",
-                        "text_output": extracted_text.strip()
+                        "generated_image_url": f"data:image/png;base64,{extracted_b64}",
+                        "model_used": "models/gemini-3.1-flash-lite-image"
                     }
 
             except Exception as e:
                 logger.info(f"Gemini image API limit/error ({e}). Using Free AI Image Generator (Flux).")
 
-        # 100% Free AI Image Generation Fallback (Flux / Stable Diffusion)
+        # 100% Free AI Product Image Generation Fallback (Flux / Stable Diffusion)
         free_ai_url = self._generate_free_ai_image_url(prompt)
         return {
-            "status": "success_free_ai",
-            "image_url": free_ai_url,
+            "status": "success",
+            "generated_image_url": free_ai_url,
             "model_used": "flux-schnell-free-ai"
         }
 

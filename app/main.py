@@ -7,15 +7,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.db.vector_db import vector_db_manager
 from app.llm.rag_generator import rag_generator
+from app.llm.image_generator import image_generator
 from app.telemetry.event_bus import event_bus
 from app.schemas import (
-    SimpleRAGRequest,
-    SimpleRAGResponse,
-    ImageGenerateRequest,
-    ImageGenerateResponse,
+    RecommendationInput,
+    StrictRecommendationResponse,
+    ImageGenerationInput,
+    ImageGenerationOutput,
     HealthCheckResponse
 )
-
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main_service")
@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    description="Streamlined Multimodal E-Commerce RAG Microservice (2 Core APIs: Health & RAG Recommend)",
+    description="Multimodal E-Commerce RAG Microservice (Recommendation & Generative Image Pipeline)",
     lifespan=lifespan
 )
 
@@ -49,7 +49,6 @@ app.add_middleware(
 # =====================================================================
 @app.get("/health", response_model=HealthCheckResponse, tags=["Health Probe"])
 async def health_check():
-
     """System health status, vector count, and DB readiness check."""
     try:
         count = await vector_db_manager.count_points()
@@ -68,55 +67,48 @@ async def health_check():
         )
 
 # =====================================================================
-# API 2: RAG Recommendation Endpoint (`POST /api/v1/rag/recommend`)
+# API 2: Recommendation Endpoint (`POST /api/v1/rag/recommend`)
+# Takes 5 parameters: prod_title, prod_image_url, price, category, brand
+# Returns strict 5-output pattern:
+# 1 product_description
+# 1.1 estimated_price
+# 2 key_features (bullet points)
+# 3 detected_product_specifications_and_attributes
+# 4 mined_high_rank_seo_keywords
+# 5 best_prompt_for_image_enhancement
 # =====================================================================
-@app.post("/", response_model=SimpleRAGResponse, tags=["Multimodal RAG"])
-@app.post("/api/v1/rag/recommend", response_model=SimpleRAGResponse, tags=["Multimodal RAG"])
-async def simple_rag_recommendation(request: SimpleRAGRequest):
-    """
-    Primary Multimodal RAG Recommendation API.
-    Takes user query + 5 core product parameters, auto-indexes into multi-vector DB,
-    and returns product details alongside Next-Gen AI image generation/edit prompt attributes.
-    """
+@app.post("/", response_model=StrictRecommendationResponse, tags=["Multimodal RAG"])
+@app.post("/api/v1/rag/recommend", response_model=StrictRecommendationResponse, tags=["Multimodal RAG"])
+async def recommendation_api(request: RecommendationInput):
     try:
-        return await rag_generator.generate_simple_rag_recommendation(request)
+        return await rag_generator.generate_recommendation(request)
     except Exception as e:
-        logger.error(f"RAG recommendation failed: {e}")
+        logger.error(f"Recommendation API error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Recommendation processing error: {e}"
         )
 
 # =====================================================================
-# API 3: Dedicated Image Generation & Editing (`POST /api/v1/image/generate`)
+# API 3: Generate Image Endpoint (`POST /api/v1/image/generate`)
+# Takes 2 parameters: image_url, prompt
+# Returns: generated_image_url (new product level image)
 # =====================================================================
-@app.post("/api/v1/image/generate", response_model=ImageGenerateResponse, tags=["Generative Vision"])
-async def generate_product_image(request: ImageGenerateRequest):
-    """
-    Standalone Image Generation & Editing API.
-    Takes prompt, base_image_url, product specs, and style modifiers,
-    then executes Google Imagen 3 image generation/editing.
-    """
+@app.post("/api/v1/image/generate", response_model=ImageGenerationOutput, tags=["Generative Vision"])
+async def generate_image_api(request: ImageGenerationInput):
     try:
-        from app.llm.image_generator import image_generator
-        
-        full_prompt = request.prompt
-        if request.style_modifiers:
-            full_prompt += ", " + ", ".join(request.style_modifiers)
-            
-        base_url = str(request.base_image_url) if request.base_image_url else None
-        res = await image_generator.generate_image(prompt=full_prompt, base_image_url=base_url)
-        
-        return ImageGenerateResponse(
+        res = await image_generator.generate_product_image(
+            image_url=str(request.image_url),
+            prompt=request.prompt
+        )
+        return ImageGenerationOutput(
             status=res.get("status", "success"),
-            prompt_used=full_prompt,
-            generated_image_url=res.get("image_url", base_url or "https://images.unsplash.com/photo-1505740420928-5e560c06d30e"),
-            model_used=res.get("model_used", "imagen-3.0-generate-002")
+            generated_image_url=res.get("generated_image_url", str(request.image_url)),
+            model_used=res.get("model_used", "flux-schnell-free-ai")
         )
     except Exception as e:
-        logger.error(f"Image generation failed: {e}")
+        logger.error(f"Image generation error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Image generation error: {e}"
         )
-
