@@ -37,6 +37,15 @@ class ProductIdentityValidationInfo(BaseModel):
     accepted: bool = True
     reason: str = "Verified exact product identity match"
 
+class AttributeCoverageMatrixEntry(BaseModel):
+    attribute: str
+    requirement_tier: str = "Required"  # Required, Recommended, Optional
+    retrieved: bool = True
+    verified: bool = True
+    confidence: float = 1.0
+    evidence_type: str = "EXACT_PRODUCT_EVIDENCE"
+    source_authority: str = "Manufacturer specification"
+
 class FactEvidenceValidation(BaseModel):
     attribute: str
     requirement_tier: str = "Required"
@@ -44,11 +53,12 @@ class FactEvidenceValidation(BaseModel):
     source_document_id: str
     evidence_span: str
     confidence: float = 0.98
+    evidence_type: str = "EXACT_PRODUCT_EVIDENCE"
     product_identity_validation: bool = True
     category_validation: bool = True
     generation_validation: bool = True
+    variant_validation: bool = True
     verified_status: bool = True
-
 
 class RetrievalDebugInfo(BaseModel):
     queries_generated: int = 0
@@ -62,20 +72,27 @@ class RetrievalDebugInfo(BaseModel):
     generation_valid_documents: int = 0
     generation_rejected_documents: int = 0
     identity_precision: float = 1.0
+    variant_precision: float = 1.0
     retrievable_verified_facts: int = 0
     retrieved_verified_facts: int = 0
     extracted_verified_facts: int = 0
     final_verified_facts: int = 0
     retrieval_recall: float = 1.0
+    required_attribute_recall: float = 1.0
+    recommended_attribute_recall: float = 1.0
     extraction_recall: float = 1.0
     final_recall: float = 1.0
     fact_precision: float = 1.0
     hallucination_rate: float = 0.0
     evidence_coverage: float = 1.0
     schema_attribute_coverage: float = 1.0
+    source_authority_score: float = 1.0
+    conflict_detected: bool = False
     missing_facts: List[str] = Field(default_factory=list)
     product_identity_validation: Optional[ProductIdentityValidationInfo] = None
+    attribute_coverage_matrix: Optional[List[AttributeCoverageMatrixEntry]] = None
     verified_fact_evidence: Optional[List[FactEvidenceValidation]] = None
+
 
 
 # 1. Recommendation API Output Schema (Strictly follows pattern)

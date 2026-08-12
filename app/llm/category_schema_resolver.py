@@ -69,6 +69,12 @@ class CategorySchemaResolver:
             "optional": ["included_accessories", "warranty"],
             "non_applicable": ["processor", "ram", "storage", "operating_system", "expiration_date"]
         },
+        "tools": {
+            "required": ["brand", "model", "category", "voltage", "power_source", "weight"],
+            "recommended": ["dimensions", "materials", "included_accessories", "warranty", "speed_rpm"],
+            "optional": ["finish_type", "operating_type"],
+            "non_applicable": ["skin_type", "expiration_date", "dietary_type"]
+        },
         "general": {
             "required": ["brand", "model", "category", "color", "materials", "dimensions", "weight"],
             "recommended": ["features", "warranty", "included_accessories"],
@@ -76,6 +82,24 @@ class CategorySchemaResolver:
             "non_applicable": []
         }
     }
+
+    ATTRIBUTE_SYNONYMS: Dict[str, List[str]] = {
+        "weight": ["weight", "item weight", "product weight", "net weight", "unit weight", "mass"],
+        "dimensions": ["dimensions", "measurements", "product dimensions", "item dimensions", "size", "height width depth"],
+        "materials": ["material", "materials", "construction", "composition", "fabric", "build"],
+        "included_accessories": ["included", "package contents", "box contents", "what's included", "accessories", "in the box"],
+        "part_number": ["part number", "MPN", "OEM part number", "SKU", "model number", "catalog number"],
+        "fitment": ["fitment", "vehicle compatibility", "fits", "compatibility", "application"],
+        "display": ["display", "screen", "panel", "resolution", "display size", "screen size"],
+        "battery_life": ["battery life", "battery", "runtime", "endurance", "battery capacity", "playtime"],
+        "care_instructions": ["care instructions", "washing instructions", "care", "cleaning instructions", "maintenance"],
+        "key_ingredients": ["ingredients", "key ingredients", "active ingredients", "formula", "formulation"]
+    }
+
+    @classmethod
+    def get_attribute_synonyms(cls, attribute: str) -> List[str]:
+        attr_lower = attribute.lower()
+        return cls.ATTRIBUTE_SYNONYMS.get(attr_lower, [attribute])
 
     @classmethod
     def resolve_schema(cls, category_path: str, product_title: str = "") -> CategorySchemaResolution:
@@ -87,11 +111,11 @@ class CategorySchemaResolver:
         primary_domain = "general"
         if any(k in cat_lower for k in ["apparel", "clothing", "dress", "shirt", "pant", "jeans", "shoe", "footwear", "jacket"]):
             primary_domain = "apparel"
-        elif any(k in cat_lower for k in ["electronic", "phone", "mobile", "laptop", "audio", "headphone", "earbud", "tv", "camera", "tablet", "computer", "console", "switch"]):
+        elif any(k in cat_lower for k in ["electronic", "phone", "mobile", "laptop", "audio", "headphone", "earbud", "tv", "camera", "tablet", "computer", "console", "switch", "vacuum"]):
             primary_domain = "electronics"
-        elif any(k in cat_lower for k in ["appliance", "refrigerator", "washer", "dryer", "microwave", "vacuum", "oven"]):
+        elif any(k in cat_lower for k in ["appliance", "refrigerator", "washer", "dryer", "microwave", "oven"]):
             primary_domain = "appliances"
-        elif any(k in cat_lower for k in ["furniture", "chair", "table", "desk", "sofa", "bed", "cabinet", "shelf"]):
+        elif any(k in cat_lower for k in ["furniture", "chair", "table", "desk", "sofa", "bed", "cabinet", "shelf", "kallax"]):
             primary_domain = "furniture"
         elif any(k in cat_lower for k in ["automotive", "auto", "car", "wiper", "brake", "engine", "oil filter", "tire"]):
             primary_domain = "automotive"
@@ -101,6 +125,8 @@ class CategorySchemaResolver:
             primary_domain = "groceries"
         elif any(k in cat_lower for k in ["sports", "fitness", "exercise", "racket", "ball", "gym", "outdoor"]):
             primary_domain = "sports"
+        elif any(k in cat_lower for k in ["tool", "drill", "dewalt", "saw", "wrench"]):
+            primary_domain = "tools"
 
         domain_info = cls.DOMAINS[primary_domain]
 
