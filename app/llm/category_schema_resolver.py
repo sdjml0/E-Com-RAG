@@ -199,11 +199,6 @@ class CategorySchemaResolver:
             dynamic_req.extend(["dimensions", "weight", "color", "materials"])
             dynamic_rec.extend(["weight_capacity", "assembly_required"])
             dynamic_non_app.extend(["processor", "ram", "storage", "battery_life", "part_number"])
-        elif any(k in cat_title_lower for k in ["horlicks", "drink", "beverage", "grocery", "health", "malted", "food", "chocolate"]):
-            primary_domain = "grocery"
-            dynamic_req.extend(["flavor", "target_segment", "variant"])
-            dynamic_rec.extend(["key_nutrients", "dietary_type"])
-            dynamic_non_app.extend(["processor", "ram", "storage", "battery_life", "part_number", "fitment", "dimensions"])
         else:
             primary_domain = "general_ecommerce"
             dynamic_req.extend(["color", "materials", "dimensions", "weight"])
