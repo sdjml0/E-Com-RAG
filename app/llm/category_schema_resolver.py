@@ -89,12 +89,28 @@ class CategorySchemaResolver:
                     f"}}\n"
                 )
 
-                interaction = client.interactions.create(
-                    model=settings.GEMINI_MODEL,
-                    input=discovery_prompt
-                )
-                output_text = getattr(interaction, 'output_text', '')
-                clean_text = output_text.strip()
+                output_text = None
+                if hasattr(client, "models") and hasattr(client.models, "generate_content"):
+                    try:
+                        res = client.models.generate_content(
+                            model=settings.GEMINI_MODEL,
+                            contents=discovery_prompt
+                        )
+                        output_text = getattr(res, "text", None) or getattr(res, "output_text", None)
+                    except Exception as e:
+                        logger.warning(f"Category schema discovery models.generate_content error: {e}")
+
+                if not output_text and hasattr(client, "interactions") and hasattr(client.interactions, "create"):
+                    try:
+                        interaction = client.interactions.create(
+                            model=settings.GEMINI_MODEL,
+                            input=discovery_prompt
+                        )
+                        output_text = getattr(interaction, 'output_text', '') or getattr(interaction, 'text', '')
+                    except Exception as e:
+                        logger.warning(f"Category schema discovery interactions.create error: {e}")
+
+                clean_text = (output_text or "").strip()
                 if clean_text.startswith("```"):
                     clean_text = re.sub(r"^```[a-zA-Z]*\n?", "", clean_text)
                     clean_text = re.sub(r"\n?```$", "", clean_text).strip()

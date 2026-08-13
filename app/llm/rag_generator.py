@@ -145,6 +145,41 @@ class RAGGenerator:
             text = re.sub(r"\n?```$", "", text)
         return text.strip()
 
+    async def _call_gemini_api(self, prompt: str, max_retries: int = 2) -> Optional[str]:
+        """Calls Google Gemini API using standard models.generate_content with retry logic."""
+        if not self.client:
+            return None
+
+        model_name = settings.GEMINI_MODEL
+
+        for attempt in range(max_retries + 1):
+            try:
+                # 1. Standard production endpoint: client.models.generate_content
+                if hasattr(self.client, "models") and hasattr(self.client.models, "generate_content"):
+                    res = self.client.models.generate_content(
+                        model=model_name,
+                        contents=prompt
+                    )
+                    text = getattr(res, "text", None) or getattr(res, "output_text", None)
+                    if text and text.strip():
+                        return text.strip()
+
+                # 2. Secondary fallback: client.interactions.create
+                if hasattr(self.client, "interactions") and hasattr(self.client.interactions, "create"):
+                    interaction = self.client.interactions.create(
+                        model=model_name,
+                        input=prompt
+                    )
+                    text = getattr(interaction, "output_text", None) or getattr(interaction, "text", None)
+                    if text and text.strip():
+                        return text.strip()
+            except Exception as e:
+                logger.warning(f"Gemini API attempt {attempt + 1}/{max_retries + 1} error ({e}).")
+                if attempt < max_retries:
+                    await asyncio.sleep(1.0 * (attempt + 1))
+
+        return None
+
     def _generate_domain_validated_multi_queries(
         self,
         brand: str,
@@ -293,12 +328,8 @@ class RAGGenerator:
                     f"}}\n"
                 )
 
-                interaction = self.client.interactions.create(
-                    model=settings.GEMINI_MODEL,
-                    input=extraction_prompt
-                )
-                output_text = getattr(interaction, 'output_text', '')
-                clean_text = self._clean_json_str(output_text)
+                output_text = await self._call_gemini_api(extraction_prompt)
+                clean_text = self._clean_json_str(output_text or "")
                 if clean_text:
                     parsed = json.loads(clean_text)
                     if parsed.get("verified_attributes"):
@@ -742,12 +773,8 @@ class RAGGenerator:
                     f"}}\n"
                 )
 
-                interaction = self.client.interactions.create(
-                    model=settings.GEMINI_MODEL,
-                    input=user_prompt
-                )
-                output_text = getattr(interaction, 'output_text', '')
-                clean_text = self._clean_json_str(output_text)
+                output_text = await self._call_gemini_api(user_prompt)
+                clean_text = self._clean_json_str(output_text or "")
 
                 if clean_text:
                     parsed = json.loads(clean_text)
