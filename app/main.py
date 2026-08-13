@@ -12,6 +12,7 @@ from app.telemetry.event_bus import event_bus
 from app.embeddings.text_embedder import text_embedder
 from app.embeddings.vision_embedder import vision_embedder
 from app.adapters.marketplace import marketplace_adapter_engine, MarketplaceAdaptationResponse
+from app.search.hybrid_searcher import hybrid_searcher
 from app.schemas import (
     RecommendationInput,
     StrictRecommendationResponse,
@@ -20,7 +21,9 @@ from app.schemas import (
     HealthCheckResponse,
     ProductIngestRequest,
     BatchIngestRequest,
-    IngestResponse
+    IngestResponse,
+    SearchQueryRequest,
+    SearchQueryResponse
 )
 
 
@@ -137,7 +140,22 @@ async def marketplace_adapt_api(request: RecommendationInput):
         )
 
 # =====================================================================
-# API 5: Product Ingestion Endpoints (`POST /api/v1/products/ingest` & `POST /api/v1/products/batch-ingest`)
+# API 5: Vector DB Search & Product Information Retrieval Endpoint (`POST /api/v1/products/search`)
+# Performs 2-stage hybrid multi-vector retrieval (Text + Vision + Payload Filtering)
+# =====================================================================
+@app.post("/api/v1/products/search", response_model=SearchQueryResponse, tags=["Vector Retrieval"])
+async def search_products_api(request: SearchQueryRequest):
+    try:
+        return await hybrid_searcher.execute_search(request)
+    except Exception as e:
+        logger.error(f"Vector search retrieval error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Vector search failed: {e}"
+        )
+
+# =====================================================================
+# API 6: Product Ingestion Endpoints (`POST /api/v1/products/ingest` & `POST /api/v1/products/batch-ingest`)
 # Embeds and stores single/batch products directly into Qdrant Vector DB
 # =====================================================================
 @app.post("/api/v1/products/ingest", response_model=IngestResponse, tags=["Catalog Ingestion"])
