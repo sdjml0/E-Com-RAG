@@ -9,6 +9,7 @@ from app.db.vector_db import vector_db_manager
 from app.llm.rag_generator import rag_generator
 from app.llm.image_generator import image_generator
 from app.telemetry.event_bus import event_bus
+from app.adapters.marketplace import marketplace_adapter_engine, MarketplaceAdaptationResponse
 from app.schemas import (
     RecommendationInput,
     StrictRecommendationResponse,
@@ -112,3 +113,20 @@ async def generate_image_api(request: ImageGenerationInput):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Image generation error: {e}"
         )
+
+# =====================================================================
+# API 4: Marketplace Adaptation Endpoint (`POST /api/v1/marketplace/adapt`)
+# Accepts 5 core parameters, executes RAG pipeline, and outputs Amazon, Flipkart, Shopify schemas
+# =====================================================================
+@app.post("/api/v1/marketplace/adapt", response_model=MarketplaceAdaptationResponse, tags=["Marketplace Adapters"])
+async def marketplace_adapt_api(request: RecommendationInput):
+    try:
+        universal_res = await rag_generator.generate_recommendation(request)
+        return marketplace_adapter_engine.adapt(universal_res, brand=request.brand)
+    except Exception as e:
+        logger.error(f"Marketplace adaptation error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Marketplace transformation error: {e}"
+        )
+
