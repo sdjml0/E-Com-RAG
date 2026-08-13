@@ -244,11 +244,13 @@ class RAGGenerator:
 
         evidence_texts = []
         for idx, hit in enumerate(evidence_chunks, 1):
+            h_id = getattr(hit, "product_id", None) or getattr(hit, "id", None) or f"doc-{idx}"
             h_title = getattr(hit, "prod_title", "")
             h_brand = getattr(hit, "brand", "")
             h_cat = getattr(hit, "category", "")
             h_price = getattr(hit, "price", 0.0)
-            evidence_texts.append(f"Evidence Chunk {idx} (Doc ID: doc-{idx}): Title: '{h_title}', Brand: '{h_brand}', Category: '{h_cat}', Price: ${h_price:.2f}")
+            evidence_texts.append(f"Evidence Chunk {idx} (Doc ID: {h_id}): Title: '{h_title}', Brand: '{h_brand}', Category: '{h_cat}', Price: ${h_price:.2f}")
+
 
         context_block = "\n".join(evidence_texts) if evidence_texts else "No matching vector documents retrieved."
 
@@ -415,7 +417,9 @@ class RAGGenerator:
         )
 
         verified_attrs = gt_entry.get("verified_attributes", {})
-        doc_id = gt_entry.get("source_authority", f"Manufacturer Specification Sheet for {title}")
+        first_hit_id = getattr(top_evidence_chunks[0], "product_id", None) if top_evidence_chunks else None
+        doc_id = first_hit_id or gt_entry.get("source_authority", f"Manufacturer Specification Sheet for {title}")
+
 
         extracted_facts: Dict[str, Dict[str, Any]] = {}
         unique_normalized_facts: Set[str] = set()
@@ -754,6 +758,7 @@ class RAGGenerator:
                         detected_product_specifications_and_attributes=parsed.get("detected_product_specifications_and_attributes", verified_specs_response),
                         mined_high_rank_seo_keywords=parsed.get("mined_high_rank_seo_keywords", seo),
                         best_prompt_for_image_enhancement=parsed.get("best_prompt_for_image_enhancement", image_prompt),
+                        fact_provenance=fact_evidence_list,
                         retrieval_debug=debug_info
                     )
             except Exception as e:
@@ -772,7 +777,9 @@ class RAGGenerator:
             detected_product_specifications_and_attributes=verified_specs_response,
             mined_high_rank_seo_keywords=seo,
             best_prompt_for_image_enhancement=image_prompt,
+            fact_provenance=fact_evidence_list,
             retrieval_debug=debug_info
         )
+
 
 rag_generator = RAGGenerator()

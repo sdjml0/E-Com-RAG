@@ -117,7 +117,9 @@ class StrictRecommendationResponse(BaseModel):
     detected_product_specifications_and_attributes: Dict[str, Any] = Field(..., description="Detected product specifications & attributes")
     mined_high_rank_seo_keywords: List[str] = Field(..., description="Mined high-rank SEO keywords")
     best_prompt_for_image_enhancement: str = Field(..., description="Best prompt for image enhancement")
+    fact_provenance: Optional[List[FactEvidenceValidation]] = Field(None, description="Explicit proof & source citations for every extracted fact and attribute")
     retrieval_debug: Optional[RetrievalDebugInfo] = Field(None, description="Detailed 18-point RAG pipeline debug metrics")
+
 
 # 2. Image Generation API Input Schema
 class ImageGenerationInput(BaseModel):
