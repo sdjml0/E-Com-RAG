@@ -9,8 +9,8 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "production"
     
     # Qdrant Vector Database
-    QDRANT_URL: str = ":memory:"  # Defaults to in-memory, supports http://localhost:6333 or cloud URL
-    QDRANT_API_KEY: str | None = None
+    QDRANT_URL: str = os.getenv("QDRANT_URL", "./qdrant_db")
+    QDRANT_API_KEY: str | None = os.getenv("QDRANT_API_KEY")
     COLLECTION_NAME: str = "ecommerce_products_v1"
     
     # Vector Dimensions

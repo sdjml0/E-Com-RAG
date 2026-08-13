@@ -20,6 +20,9 @@ class VectorDBManager:
         self.collection_name = collection_name
         if qdrant_url == ":memory:":
             self.client = AsyncQdrantClient(":memory:")
+        elif qdrant_url.startswith("./") or qdrant_url.startswith("/") or qdrant_url.startswith("path:"):
+            local_path = qdrant_url.replace("path:", "").strip()
+            self.client = AsyncQdrantClient(path=local_path)
         else:
             self.client = AsyncQdrantClient(url=qdrant_url, api_key=api_key)
 
