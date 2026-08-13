@@ -3,6 +3,7 @@ import json
 import re
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
+from app.config import settings
 
 logger = logging.getLogger("category_schema_resolver")
 
@@ -89,7 +90,7 @@ class CategorySchemaResolver:
                 )
 
                 interaction = client.interactions.create(
-                    model='models/gemini-3.1-flash-lite',
+                    model=settings.GEMINI_MODEL,
                     input=discovery_prompt
                 )
                 output_text = getattr(interaction, 'output_text', '')

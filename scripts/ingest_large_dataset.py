@@ -30,6 +30,81 @@ from app.db.vector_db import vector_db_manager
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("dataset_ingestor")
 
+import re
+
+def _clean_price(val: Any) -> float:
+    if not val:
+        return 29.99
+    val_str = str(val).replace("$", "").replace(",", "").strip()
+    try:
+        f = float(val_str)
+        return f if f >= 0 else 29.99
+    except ValueError:
+        match = re.search(r"(\d+(?:\.\d+)?)", val_str)
+        if match:
+            return float(match.group(1))
+        return 29.99
+
+def _clean_image_url(val: Any) -> str:
+    if not val:
+        return "https://images.unsplash.com/photo-1505740420928-5e560c06d30e"
+    val_str = str(val).strip()
+    if val_str.startswith("["):
+        try:
+            parsed = json.loads(val_str)
+            if isinstance(parsed, list) and parsed:
+                return str(parsed[0])
+        except Exception:
+            pass
+        match = re.search(r"https?://[^\s\"'\]]+", val_str)
+        if match:
+            return match.group(0)
+    if val_str.startswith("http://") or val_str.startswith("https://"):
+        return val_str
+    return "https://images.unsplash.com/photo-1505740420928-5e560c06d30e"
+
+def _clean_category(val: Any) -> str:
+    if not val:
+        return "General"
+    val_str = str(val).strip()
+    if val_str.startswith("["):
+        try:
+            parsed = json.loads(val_str)
+            if isinstance(parsed, list) and parsed:
+                return str(parsed[0])
+        except Exception:
+            pass
+        val_str = re.sub(r"[\[\]\"]", "", val_str).strip()
+    return val_str or "General"
+
+def _normalize_product_dict(row: Dict[str, Any], i: int) -> Dict[str, Any]:
+    prod_id = (
+        row.get("product_id") or row.get("uniq_id") or row.get("pid") or
+        row.get("id") or row.get("sku") or f"SKU-{i:06d}"
+    )
+    title = (
+        row.get("prod_title") or row.get("product_name") or row.get("Title") or
+        row.get("title") or row.get("name") or "Product"
+    )
+    raw_img = (
+        row.get("prod_image_url") or row.get("image_url") or row.get("image")
+    )
+    raw_price = (
+        row.get("price") or row.get("Current/discounted_price") or
+        row.get("discounted_price") or row.get("retail_price") or row.get("Price_on_variant")
+    )
+    cat = row.get("category") or row.get("product_category_tree")
+    brand = row.get("brand") or row.get("Brand") or "Generic"
+
+    return {
+        "product_id": str(prod_id).strip(),
+        "prod_title": str(title).strip(),
+        "prod_image_url": _clean_image_url(raw_img),
+        "price": _clean_price(raw_price),
+        "category": _clean_category(cat),
+        "brand": str(brand).strip()
+    }
+
 def read_dataset(file_path: str) -> List[Dict[str, Any]]:
     """Reads CSV, JSON, or JSONL file into product dictionaries."""
     products = []
@@ -41,14 +116,7 @@ def read_dataset(file_path: str) -> List[Dict[str, Any]]:
         with open(file_path, mode="r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for i, row in enumerate(reader):
-                products.append({
-                    "product_id": str(row.get("product_id") or row.get("id") or row.get("sku") or f"SKU-{i:06d}"),
-                    "prod_title": str(row.get("prod_title") or row.get("title") or row.get("name") or "Product"),
-                    "prod_image_url": str(row.get("prod_image_url") or row.get("image_url") or row.get("image") or "https://images.unsplash.com/photo-1505740420928-5e560c06d30e"),
-                    "price": float(row.get("price") or 29.99),
-                    "category": str(row.get("category") or "General"),
-                    "brand": str(row.get("brand") or "Generic")
-                })
+                products.append(_normalize_product_dict(row, i))
     elif ext in (".json", ".jsonl"):
         with open(file_path, mode="r", encoding="utf-8") as f:
             if ext == ".json":
@@ -58,25 +126,18 @@ def read_dataset(file_path: str) -> List[Dict[str, Any]]:
                 items = [json.loads(line) for line in f if line.strip()]
 
             for i, row in enumerate(items):
-                products.append({
-                    "product_id": str(row.get("product_id") or row.get("id") or row.get("sku") or f"SKU-{i:06d}"),
-                    "prod_title": str(row.get("prod_title") or row.get("title") or row.get("name") or "Product"),
-                    "prod_image_url": str(row.get("prod_image_url") or row.get("image_url") or row.get("image") or "https://images.unsplash.com/photo-1505740420928-5e560c06d30e"),
-                    "price": float(row.get("price") or 29.99),
-                    "category": str(row.get("category") or "General"),
-                    "brand": str(row.get("brand") or "Generic")
-                })
+                products.append(_normalize_product_dict(row, i))
     else:
         raise ValueError(f"Unsupported file format '{ext}'. Please use .csv, .json, or .jsonl")
 
     logger.info(f"Loaded {len(products):,} products from file.")
     return products
 
-async def process_batch(batch: List[Dict[str, Any]]):
-    """Processes a chunk batch of products: generates vectors and upserts to Qdrant."""
+async def process_batch(batch: List[Dict[str, Any]], fast_embedding: bool = False):
+    """Processes a chunk batch of products: generates vectors in parallel and upserts to Qdrant."""
     ingest_requests = []
-    text_vectors = []
-    image_vectors = []
+    text_tasks = []
+    vision_tasks = []
 
     for item in batch:
         try:
@@ -91,18 +152,20 @@ async def process_batch(batch: List[Dict[str, Any]]):
             ingest_requests.append(req)
 
             composite_text = f"Brand: {req.brand} | Title: {req.prod_title} | Category: {req.category}"
-            t_vec = await text_embedder.embed_text(composite_text)
-            i_vec = await vision_embedder.embed_image_url(str(req.prod_image_url))
-
-            text_vectors.append(t_vec)
-            image_vectors.append(i_vec)
+            text_tasks.append(text_embedder.embed_text(composite_text))
+            if fast_embedding:
+                vision_tasks.append(asyncio.sleep(0, result=vision_embedder._fallback_embed(str(req.prod_image_url))))
+            else:
+                vision_tasks.append(vision_embedder.embed_image_url(str(req.prod_image_url)))
         except Exception as e:
-            logger.warning(f"Error processing item {item.get('product_id')}: {e}")
+            logger.warning(f"Error preparing item {item.get('product_id')}: {e}")
 
     if ingest_requests:
-        await vector_db_manager.upsert_batch(ingest_requests, text_vectors, image_vectors)
+        text_vectors = await asyncio.gather(*text_tasks)
+        vision_vectors = await asyncio.gather(*vision_tasks)
+        await vector_db_manager.upsert_batch(ingest_requests, text_vectors, vision_vectors)
 
-async def main(file_path: str, batch_size: int = 500):
+async def main(file_path: str, batch_size: int = 500, fast_embedding: bool = False):
     await vector_db_manager.init_collection()
     products = read_dataset(file_path)
 
@@ -111,7 +174,7 @@ async def main(file_path: str, batch_size: int = 500):
 
     for i in range(0, len(products), batch_size):
         chunk = products[i:i + batch_size]
-        await process_batch(chunk)
+        await process_batch(chunk, fast_embedding=fast_embedding)
         total_processed += len(chunk)
         elapsed = time.time() - start_time
         rate = total_processed / elapsed if elapsed > 0 else 0
@@ -123,6 +186,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ingest Large Dataset into Multimodal RAG Engine")
     parser.add_argument("--file", type=str, required=True, help="Path to CSV, JSON, or JSONL product dataset")
     parser.add_argument("--batch-size", type=int, default=500, help="Number of products per vector batch (default: 500)")
+    parser.add_argument("--fast", action="store_true", help="Enable high-speed feature hashing for vision embeddings")
     args = parser.parse_args()
 
-    asyncio.run(main(args.file, args.batch_size))
+    asyncio.run(main(args.file, args.batch_size, fast_embedding=args.fast))

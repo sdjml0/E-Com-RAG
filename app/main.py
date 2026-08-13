@@ -9,14 +9,20 @@ from app.db.vector_db import vector_db_manager
 from app.llm.rag_generator import rag_generator
 from app.llm.image_generator import image_generator
 from app.telemetry.event_bus import event_bus
+from app.embeddings.text_embedder import text_embedder
+from app.embeddings.vision_embedder import vision_embedder
 from app.adapters.marketplace import marketplace_adapter_engine, MarketplaceAdaptationResponse
 from app.schemas import (
     RecommendationInput,
     StrictRecommendationResponse,
     ImageGenerationInput,
     ImageGenerationOutput,
-    HealthCheckResponse
+    HealthCheckResponse,
+    ProductIngestRequest,
+    BatchIngestRequest,
+    IngestResponse
 )
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main_service")
@@ -129,4 +135,51 @@ async def marketplace_adapt_api(request: RecommendationInput):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Marketplace transformation error: {e}"
         )
+
+# =====================================================================
+# API 5: Product Ingestion Endpoints (`POST /api/v1/products/ingest` & `POST /api/v1/products/batch-ingest`)
+# Embeds and stores single/batch products directly into Qdrant Vector DB
+# =====================================================================
+@app.post("/api/v1/products/ingest", response_model=IngestResponse, tags=["Catalog Ingestion"])
+async def ingest_product_api(request: ProductIngestRequest):
+    try:
+        t_vec = await text_embedder.embed_text(f"{request.brand} {request.prod_title} {request.category}")
+        v_vec = await vision_embedder.embed_image_url(str(request.prod_image_url))
+        await vector_db_manager.upsert_product(request, text_vector=t_vec, image_vector=v_vec)
+        return IngestResponse(
+            status="success",
+            ingested_count=1,
+            message=f"Product '{request.product_id}' successfully embedded and stored into Qdrant."
+        )
+    except Exception as e:
+        logger.error(f"Product ingestion error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Product ingestion failed: {e}"
+        )
+
+@app.post("/api/v1/products/batch-ingest", response_model=IngestResponse, tags=["Catalog Ingestion"])
+async def batch_ingest_products_api(request: BatchIngestRequest):
+    try:
+        t_vecs = []
+        v_vecs = []
+        for prod in request.products:
+            t_vec = await text_embedder.embed_text(f"{prod.brand} {prod.prod_title} {prod.category}")
+            v_vec = await vision_embedder.embed_image_url(str(prod.prod_image_url))
+            t_vecs.append(t_vec)
+            v_vecs.append(v_vec)
+
+        await vector_db_manager.upsert_batch(request.products, text_vectors=t_vecs, image_vectors=v_vecs)
+        return IngestResponse(
+            status="success",
+            ingested_count=len(request.products),
+            message=f"Successfully embedded and stored {len(request.products)} products into Qdrant."
+        )
+    except Exception as e:
+        logger.error(f"Batch product ingestion error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Batch ingestion failed: {e}"
+        )
+
 

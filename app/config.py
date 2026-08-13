@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     
     # Multimodal LLM (Gemini / Fallback)
     GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
-    GEMINI_MODEL: str = "models/gemini-3.1-flash-lite"
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "models/gemini-3.6-flash")
 
     
     model_config = SettingsConfigDict(

@@ -294,7 +294,7 @@ class RAGGenerator:
                 )
 
                 interaction = self.client.interactions.create(
-                    model='models/gemini-3.1-flash-lite',
+                    model=settings.GEMINI_MODEL,
                     input=extraction_prompt
                 )
                 output_text = getattr(interaction, 'output_text', '')
@@ -743,7 +743,7 @@ class RAGGenerator:
                 )
 
                 interaction = self.client.interactions.create(
-                    model='models/gemini-3.1-flash-lite',
+                    model=settings.GEMINI_MODEL,
                     input=user_prompt
                 )
                 output_text = getattr(interaction, 'output_text', '')
