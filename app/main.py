@@ -19,6 +19,7 @@ from app.schemas import (
     ImageGenerationInput,
     ImageGenerationOutput,
     HealthCheckResponse,
+    UptimePingResponse,
     ProductIngestRequest,
     BatchIngestRequest,
     IngestResponse,
@@ -29,6 +30,7 @@ from app.schemas import (
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main_service")
+SERVER_START_TIME = time.time()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -55,19 +57,43 @@ app.add_middleware(
 )
 
 # =====================================================================
-# API 1: Health Diagnostic Probe (`GET /health`)
+# API 1: UptimeRobot Heartbeat Ping Probe (`GET /ping`, `HEAD /ping`, `GET /healthz`)
+# Fast, zero-overhead endpoint returning 200 OK for uptime monitoring
+# =====================================================================
+@app.get("/ping", response_model=UptimePingResponse, tags=["Uptime Monitoring"])
+@app.head("/ping", tags=["Uptime Monitoring"])
+@app.get("/healthz", response_model=UptimePingResponse, tags=["Uptime Monitoring"])
+@app.head("/healthz", tags=["Uptime Monitoring"])
+async def uptime_ping():
+    """UptimeRobot ultra-fast server active/inactive heartbeat ping probe."""
+    now = time.time()
+    return UptimePingResponse(
+        status="ok",
+        server="active",
+        service=settings.PROJECT_NAME,
+        uptime_seconds=round(now - SERVER_START_TIME, 2),
+        timestamp=round(now, 3)
+    )
+
+# =====================================================================
+# API 2: Comprehensive Health Diagnostic Probe (`GET /health`, `HEAD /health`)
+# Full system health status, vector DB count, and DB readiness check
 # =====================================================================
 @app.get("/health", response_model=HealthCheckResponse, tags=["Health Probe"])
+@app.head("/health", tags=["Health Probe"])
 async def health_check():
     """System health status, vector count, and DB readiness check."""
     try:
         count = await vector_db_manager.count_points()
+        now = time.time()
         return HealthCheckResponse(
             status="healthy",
             vector_db_status="green",
             total_vectors_indexed=count,
             p95_latency_ms=2.60,
-            active_subscribers=event_bus.subscriber_count
+            active_subscribers=event_bus.subscriber_count,
+            uptime_seconds=round(now - SERVER_START_TIME, 2),
+            environment=settings.ENVIRONMENT
         )
     except Exception as e:
         logger.error(f"Health probe failed: {e}")

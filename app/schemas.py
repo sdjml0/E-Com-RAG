@@ -204,6 +204,14 @@ class SimpleRAGRequest(RecommendationInput):
 class SimpleRAGResponse(StrictRecommendationResponse):
     pass
 
+# UptimeRobot Heartbeat Ping Response
+class UptimePingResponse(BaseModel):
+    status: str = "ok"
+    server: str = "active"
+    service: str = "Multimodal E-Commerce RAG Microservice"
+    uptime_seconds: float
+    timestamp: float
+
 # System Health Probe Response
 class HealthCheckResponse(BaseModel):
     status: Literal["healthy", "degraded", "unhealthy"]
@@ -211,3 +219,5 @@ class HealthCheckResponse(BaseModel):
     total_vectors_indexed: int
     p95_latency_ms: float
     active_subscribers: int
+    uptime_seconds: Optional[float] = None
+    environment: Optional[str] = "production"

@@ -9,6 +9,27 @@ async def test_health_endpoint():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
+    assert "uptime_seconds" in data
+
+@pytest.mark.asyncio
+async def test_uptimerobot_ping_endpoints():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        # GET /ping
+        res1 = await ac.get("/ping")
+        assert res1.status_code == 200
+        data1 = res1.json()
+        assert data1["status"] == "ok"
+        assert data1["server"] == "active"
+        assert "uptime_seconds" in data1
+
+        # HEAD /ping
+        res2 = await ac.head("/ping")
+        assert res2.status_code == 200
+
+        # GET /healthz
+        res3 = await ac.get("/healthz")
+        assert res3.status_code == 200
+        assert res3.json()["status"] == "ok"
 
 @pytest.mark.asyncio
 async def test_recommendation_api_strict_pattern():
